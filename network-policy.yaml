@@ -1,0 +1,39 @@
+kind: NetworkPolicy
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: mpi-pods-isolation-policy
+spec:
+  podSelector:
+    matchLabels:
+      mpi-job-id: ""
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              mpi-job-id: ""
+        - podSelector:
+            matchLabels:
+              app: terminal-web-backend
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              mpi-job-id: ""
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 3.2.0.0/16 # Bloqueia a rede do seu laboratório
+              - 10.0.0.0/8     # Bloqueia outras redes privadas comuns
+              - 172.16.0.0/12  # Bloqueia outras redes privadas comuns

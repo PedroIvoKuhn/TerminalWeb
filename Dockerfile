@@ -7,7 +7,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopenmpi-dev \
     openmpi-bin \
     openssh-server \
-    openmpi-bin \
     sudo \
     git \
     curl \
