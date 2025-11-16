@@ -286,7 +286,6 @@ io.on('connection', (socket) => {
             }
             
             socket.emit('session-ready', { aliases: machineAliases });
-
             socket.emit('output', `\r\n✅ Conectado! Apelidos SSH configurados.\r\n`);
             socket.emit('output', `Tente: ssh worker-1\r\n\r\n`);
             
