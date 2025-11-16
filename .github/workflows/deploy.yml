@@ -1,0 +1,54 @@
+name: Deploy no Cluster de Produção
+
+on:
+  push:
+    branches:
+      - prod
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+    
+    steps:
+      - name: 1. Fazer Checkout do Código
+        uses: actions/checkout@v4
+
+      - name: 2. Construir e Enviar Imagem MPI
+        run: |
+          echo "--- Construindo imagem dos nós MPI ---"
+          docker build -t localhost:32000/mpi-node:latest -f Dockerfile .
+          echo "--- Enviando imagem dos nós MPI para o registro ---"
+          docker push localhost:32000/mpi-node:latest
+
+      - name: 3. Construir e Enviar Imagem do Backend
+        run: |
+          echo "--- Construindo imagem do backend ---"
+          docker build -t localhost:32000/terminal-web-backend:latest -f Dockerfile.backend .
+          echo "--- Enviando imagem do backend para o registro ---"
+          docker push localhost:32000/terminal-web-backend:latest
+
+      - name: 4. Atualizar Segredo do Kubernetes
+        run: |
+          microk8s kubectl delete secret terminal-web-secrets --ignore-not-found=true
+
+          microk8s kubectl create secret generic terminal-web-secrets \
+            --from-literal=MONGO_DB_URI="${{ secrets.MONGO_DB_URI }}" \
+            --from-literal=LTI_ENCRYPTION_KEY="${{ secrets.LTI_ENCRYPTION_KEY }}" \
+            --from-literal=LTI_PLATFORM_URL="${{ secrets.LTI_PLATFORM_URL }}" \
+            --from-literal=LTI_PLATFORM_NAME="${{ secrets.LTI_PLATFORM_NAME }}" \
+            --from-literal=LTI_CLIENT_ID="${{ secrets.LTI_CLIENT_ID }}" \
+            --from-literal=LTI_AUTH_ENDPOINT="${{ secrets.LTI_AUTH_ENDPOINT }}" \
+            --from-literal=LTI_TOKEN_ENDPOINT="${{ secrets.LTI_TOKEN_ENDPOINT }}" \
+            --from-literal=LTI_KEYSET_ENDPOINT="${{ secrets.LTI_KEYSET_ENDPOINT }}" \
+            --from-literal=PORT="${{ secrets.PORT }}" \
+            --from-literal=DEFAULT_MPI_IMAGE="${{ secrets.DEFAULT_MPI_IMAGE }}"
+
+      - name: 5. Aplicar Manifestos do Kubernetes
+        run: |
+          microk8s kubectl apply -f rbac.yaml
+          microk8s kubectl apply -f deployment.yaml
+          microk8s kubectl apply -f network-policy.yaml
+
+      # 7. Força a reinicialização dos pods do backend para usar a nova imagem
+      - name: 6. Reiniciar Deploy do Backend
+        run: microk8s kubectl rollout restart deployment terminal-web-backend
