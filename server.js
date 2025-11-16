@@ -232,8 +232,12 @@ io.on('connection', (socket) => {
                             imagePullPolicy: 'IfNotPresent',
                             resources: {
                                 requests: {
-                                    cpu: "1000m",
-                                    memory: "512Mi"
+                                    cpu: "100m",
+                                    memory: "128Mi"
+                                },
+                                limits: {
+                                    cpu: "1",
+                                    memory: "2048Mi"
                                 }
                             },
                             volumeMounts: [
