@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: terminal-web-backend
 spec:
-  replicas: 1 
+  replicas: 1
   selector:
     matchLabels:
       app: terminal-web-backend
@@ -15,26 +15,45 @@ spec:
       serviceAccountName: terminal-backend-sa
       containers:
         - name: backend
+          # Certifique-se que esta imagem está construída e no registro
           image: localhost:32000/terminal-web-backend:latest 
           ports:
             - containerPort: 3000
-          env:
-            - name: NODE_ENV
-              value: "production"
           envFrom:
             - secretRef:
                 name: terminal-web-secrets
 ---
+# O Serviço agora é interno (ClusterIP)
 apiVersion: v1
 kind: Service
 metadata:
   name: terminal-web-service
 spec:
-  type: NodePort 
+  type: ClusterIP # MUDOU DE NodePort PARA ClusterIP
   selector:
     app: terminal-web-backend
   ports:
     - protocol: TCP
-      port: 3000       
-      targetPort: 3000 
-      nodePort: 30000  
+      port: 80       # Porta do Serviço (interno)
+      targetPort: 3000 # Porta do Container (onde seu Node.js roda)
+---
+# AQUI ESTÁ A NOVIDADE: O INGRESS
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: terminal-web-ingress
+  annotations:
+    # Aumenta o tamanho máximo do corpo para uploads LTI, se necessário
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+spec:
+  rules:
+  - host: clusterlups.inf.ufpel.edu.br
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: terminal-web-service
+            port:
+              number: 80
