@@ -1,3 +1,4 @@
+
 # Terminal Web para Clusters
 
 Uma aplicação web que provisiona, sob demanda, ambientes já pré-configurados com uma ou múltiplas máquinas.(A versão atual está funcionando apenas com o ambiente de MPI). A solução utiliza Kubernetes para orquestrar contêineres dinamicamente, oferecendo a cada usuário um cluster privado e isolado, acessível diretamente pelo navegador.
