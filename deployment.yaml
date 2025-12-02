@@ -16,8 +16,8 @@ spec:
       containers:
         - name: backend
           # Certifique-se que esta imagem está construída e no registro
-          image: 10.220.107.110:32000/terminal-web-backend:latest 
-          #image: localhost:32000/terminal-web-backend:latest 
+          #image: 10.220.107.110:32000/terminal-web-backend:latest 
+          image: localhost:32000/terminal-web-backend:latest 
           ports:
             - containerPort: 3000
           envFrom:
