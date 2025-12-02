@@ -28,6 +28,11 @@ async function setup(app) {
         return;
     }
 
+    app.get('/', (req, res) => {
+        const unauthorizedPath = path.join(__dirname, '../views', 'unauthorized.html');
+        res.sendFile(unauthorizedPath);
+    });
+    
     // Inicia o LTI
     await lti.setup(process.env.LTI_ENCRYPTION_KEY,
         {

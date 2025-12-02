@@ -1,0 +1,45 @@
+body {
+    background-color: #2d2d2d;
+    color: #f1f1f1;
+    padding: 20px;
+    font-family: sans-serif;
+}
+
+#terminal-container {
+    display: none;
+}
+
+#terminal {
+    width: 100%;
+    height: 80vh;
+}
+
+#setup-container {
+    padding: 30px;
+    background-color: #1e1e1e;
+    border-radius: 8px;
+    text-align: center;
+}
+
+input {
+    padding: 10px;
+    margin-right: 10px;
+}
+
+button {
+    padding: 10px 20px;
+    cursor: pointer;
+}
+
+/* --- NOVO ESTILO PARA A LISTA --- */
+#machine-list {
+    list-style: none;
+    padding: 0;
+}
+
+#machine-list li {
+    background-color: #3c3c3c;
+    margin: 5px 0;
+    padding: 8px;
+    border-radius: 4px;
+}
