@@ -1,10 +1,11 @@
 const { k8sExec, namespace } = require('../config/kubernetes');
 const k8sService = require('./k8sService');
 const sshService = require('./sshService');
+const minioService = require('./minioService');
 
 module.exports = (io) => {
     io.on('connection', (socket) => {
-        socket.on('start-session', async ({numMachines, mpiImage}) => {
+        socket.on('start-session', async ({numMachines, mpiImage, userId, backupName}) => {
             const jobId = `mpi-job-${socket.id.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
             const secretName = `ssh-keys-${jobId}`;
             socket.data.jobId = jobId;
@@ -23,12 +24,24 @@ module.exports = (io) => {
                 // Esperar ficar pronto
                 await k8sService.waitForPodRunning(masterPodName);
 
+                if (backupName) {
+                    socket.emit('output', `📦 Restaurando backup: "${backupName}"... `);
+                    try {
+                        // Chama aquela função de restaurar que criamos antes
+                        await minioService.restaurarBackup(userId, masterPodName, backupName);
+                        socket.emit('output', `[OK]\r\n`);
+                    } catch (restoreErr) {
+                        console.error(restoreErr);
+                        socket.emit('output', `[FALHA AO RESTAURAR]: ${restoreErr.message}\r\n`);
+                    }
+                }
+
                 const machineAliases = ['master'];
                 for (let i = 1; i < numMachines; i++) {
                     machineAliases.push(`worker-${i}`);
                 }
 
-                socket.emit('session-ready', { aliases: machineAliases });
+                socket.emit('session-ready', { aliases: machineAliases, masterPodName: masterPodName});
 
                 socket.emit('output', `\r\n✅ Conectado! Apelidos SSH configurados.\r\n`);
                 socket.emit('output', `Tente: ssh worker-1 hostname\r\n\r\n`);

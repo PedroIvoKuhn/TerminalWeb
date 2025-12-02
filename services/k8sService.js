@@ -87,6 +87,15 @@ async function createClusterResources(jobId, numMachines, mpiImage, keys) {
     const serviceName = `svc-${jobId}`;
     const secretName = `ssh-keys-${jobId}`;
 
+    try {
+        // Tenta deletar o secret se ele já existir (ignora erro se não existir)
+        await k8sApi.deleteNamespacedSecret(secretName, namespace);
+        await k8sApi.deleteNamespacedService(serviceName, namespace);
+    } catch (e) {
+        // Ignora erro 404 (Not Found), qualquer outro erro mostra no log
+        if (e.body && e.body.code !== 404) console.log("Aviso de limpeza:", e.body.message);
+    }
+
     // Cria o secret
     const sshConfig = generateSshConfig(numMachines, jobId, masterPodName, secretName);
     const secretManifest = getSecretManifest(secretName, keys.privateKey, keys.publicKey, sshConfig);

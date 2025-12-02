@@ -27,6 +27,9 @@
         <p>Quantos nós (máquinas) você deseja para sua aplicação MPI?</p>
         <form id="setup-form">
             <input type="number" id="num-machines" value="2" min="1" required>
+            <select id="select-backup" style="padding: 10px; margin-right: 10px;">
+            <option value="">-- Começar do Zero (Vazio) --</option>
+            </select>
             <button type="submit">Iniciar Terminal</button>
         </form>
     </div>
@@ -38,6 +41,16 @@
                 </ul>
         </div>
         <hr> <div id="terminal"></div>
+    </div>
+
+    <div id="backup-ui" style="display:none; margin: 15px 0; background: #333; padding: 10px; border-radius: 5px;">
+        <h3 style="margin-top:0;">📂 Meus Arquivos</h3>
+        <ul id="lista-backups" style="list-style: none; padding-left: 0; max-height: 100px; overflow-y: auto;"></ul>
+        <div style="display: flex; gap: 10px;">
+            <input type="text" id="nome-backup" placeholder="Nome do backup (ex: trab1)" style="flex:1;">
+            <button id="btn-salvar" style="background: #28a745; color: white; border: none; padding: 5px 15px; cursor: pointer;">Salvar Agora</button>
+        </div>
+        <small id="status-cota" style="color: #ccc;"></small>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
