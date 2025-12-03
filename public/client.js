@@ -136,13 +136,9 @@ async function carregarBackups() {
 
         arquivos.forEach(arq => {
             totalSize += arq.size;
-            
-            // Tratamento do nome para exibição limpa e comparação
-            // Se seu backend manda .tar.gz, removemos aqui para ficar bonito
-            // Se o backend já manda limpo, o .replace não faz mal.
-            const nomeRaw = arq.name.split('/')[1]; 
-            // O nome para salvar/deletar (assumindo que o select tem o nome limpo)
-            const nomeParaSalvar = nomeRaw.replace('.tar.gz', '');
+
+            // O nome para salvar/deletar
+            const nomeParaSalvar = arq.name.split('/')[1].replace('.tar.gz', '');
 
             const isAtual = (nomeParaSalvar === currentLoadedBackup);
 
@@ -151,22 +147,18 @@ async function carregarBackups() {
             li.style.justifyContent = 'space-between';
             li.style.marginBottom = '5px';
             li.style.padding = '8px';
-            li.style.borderRadius = '4px'; // Um pouco de estilo
+            li.style.borderRadius = '4px';
             
             // Destaque visual se for o atual
             if (isAtual) {
                 li.style.background = 'rgba(40, 167, 69, 0.2)'; 
                 li.style.border = '1px solid #28a745';
-            } else {
-                li.style.background = '#444';
             }
             
             // Botão condicional: Salvar (se for atual) ou Abrir (se for outro)
             let botaoAcao = '';
             if (isAtual) {
                  botaoAcao = `<button onclick="salvarArquivo('${nomeParaSalvar}')" style="background:#28a745; color:white; border:none; cursor:pointer; padding: 2px 8px; margin-right:5px;">💾 Salvar</button>`;
-            } else {
-                 botaoAcao = `<button onclick="restaurar('${nomeParaSalvar}')" style="background:#007bff; color:white; border:none; cursor:pointer; padding: 2px 8px; margin-right:5px;">📂 Abrir</button>`;
             }
 
             li.innerHTML = `
@@ -210,7 +202,7 @@ window.salvarArquivo = async function(nomeAlvo) {
             // 1. Atualiza a variável local para saber que estamos neste arquivo
             currentLoadedBackup = nomeAlvo;
             
-            // 2. Avisa o servidor (ESSENCIAL PARA O AUTO-SAVE FUNCIONAR)
+            // 2. Avisa o servidor
             socket.emit('update-active-backup', nomeAlvo);
 
             // 3. Atualiza a lista visualmente
@@ -236,7 +228,6 @@ if(btnSalvarNovo) {
         
         nome = nome.trim(); // Limpa espaços
 
-        // --- VERIFICAÇÃO DE EXISTÊNCIA ---
         // Varre o dropdown para ver se esse nome já existe
         const jaExiste = Array.from(selectBackup.options).some(o => o.value === nome);
 
