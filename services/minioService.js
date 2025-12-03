@@ -109,4 +109,16 @@ async function salvarBackup(userId, podName, nomeArquivo) {
     }
 }
 
-module.exports = { listarArquivos, salvarBackup, deletarArquivo, restaurarBackup};
+async function obterArquivoParaDownload(userId, nomeArquivo) {
+    let nomeFinal = `aluno_${userId}/${nomeArquivo}`;
+    if (!nomeFinal.endsWith('.tar.gz')) nomeFinal += '.tar.gz';
+
+    try {
+        return await minioClient.getObject(BUCKET_NAME, nomeFinal);
+    } catch (e) {
+        console.error("Erro ao obter arquivo:", e);
+        throw e;
+    }
+}
+
+module.exports = { listarArquivos, salvarBackup, deletarArquivo, restaurarBackup, obterArquivoParaDownload};

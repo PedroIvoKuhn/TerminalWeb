@@ -71,4 +71,26 @@ async function start() {
     }
 }
 
+app.get('/api/download', async (req, res) => {
+    try {
+        const { userId, nomeArquivo } = req.query;
+        
+        if (!userId || !nomeArquivo) {
+            return res.status(400).send("Faltam parâmetros.");
+        }
+
+        const dataStream = await minioService.obterArquivoParaDownload(userId, nomeArquivo);
+        
+        // Força o navegador a baixar com o nome certo
+        res.attachment(nomeArquivo.endsWith('.tar.gz') ? nomeArquivo : nomeArquivo + '.tar.gz');
+        
+        // Envia o arquivo
+        dataStream.pipe(res);
+
+    } catch(e) { 
+        console.error(e);
+        res.status(500).send("Erro ao baixar arquivo."); 
+    }
+});
+
 start();

@@ -21,6 +21,64 @@ const term = new Terminal({
 const fitAddon = new FitAddon.FitAddon();
 term.loadAddon(fitAddon);
 
+// Função simples para preencher a lista de baixo
+async function carregarListaDownloads() {
+    const listaUl = document.getElementById('download-list');
+    const select = document.getElementById('select-backup');
+    
+    try {
+        const res = await fetch(`/api/backups?userId=${currentUserId}`);
+        const arquivos = await res.json();
+
+        // 1. Preenche o Dropdown (Select)
+        select.innerHTML = '<option value="">-- Começar do Zero (Vazio) --</option>';
+        arquivos.forEach(arq => {
+            const nomeLimpo = arq.name.split('/')[1].replace('.tar.gz', '');
+            const option = document.createElement('option');
+            option.value = nomeLimpo;
+            option.textContent = `📂 ${nomeLimpo}`;
+            select.appendChild(option);
+        });
+
+        // 2. Preenche a Lista de Baixo (Downloads)
+        if (listaUl) {
+            listaUl.innerHTML = '';
+            
+            if (arquivos.length === 0) {
+                listaUl.innerHTML = '<li style="color:#777; font-size: 0.9em;">Nenhum arquivo encontrado.</li>';
+                return;
+            }
+
+            arquivos.forEach(arq => {
+                const nomeRaw = arq.name.split('/')[1]; 
+                const nomeLimpo = nomeRaw.replace('.tar.gz', '');
+                const tamanho = (arq.size / 1024 / 1024).toFixed(2);
+
+                const li = document.createElement('li');
+                // Estilo simples para alinhar com o fundo cinza
+                li.style.cssText = "display: flex; justify-content: space-between; align-items: center; background: #333; margin-bottom: 5px; padding: 8px; border-radius: 4px;";
+                
+                li.innerHTML = `
+                    <span>📦 ${nomeLimpo} <small style="color:#aaa">(${tamanho} MB)</small></span>
+                    
+                    <div>
+                        <a href="/api/download?userId=${currentUserId}&nomeArquivo=${nomeRaw}" target="_blank" style="text-decoration:none;">
+                            <button type="button" style="background:#007bff; color:white; border:none; padding:4px 8px; cursor:pointer; border-radius:3px; font-size: 0.8em; margin-right: 5px;">⬇️</button>
+                        </a>
+                        <button type="button" onclick="deletar('${arq.name}')" style="background:#dc3545; color:white; border:none; padding:4px 8px; cursor:pointer; border-radius:3px; font-size: 0.8em;">🗑️</button>
+                    </div>
+                `;
+                listaUl.appendChild(li);
+            });
+        }
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+// Chame a função assim que o script carregar
+carregarListaDownloads();
+
 // --- Lógica de Inicialização ---
 function initializeTerminal() {
     setupContainer.style.display = 'none';
@@ -264,18 +322,31 @@ window.restaurar = async (nome) => {
 
 // Função global para deletar
 window.deletar = async (nome) => {
-    if(!confirm('Apagar este backup?')) return;
-    await fetch('/api/backups', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUserId, nomeCompleto: nome })
-    });
+    if(!confirm('Tem certeza que deseja APAGAR este arquivo permanentemente?')) return;
     
-    // Se apagou o arquivo que estava aberto, reseta o estado
-    const nomeLimpo = nome.split('/')[1].replace('.tar.gz', '');
-    if(nomeLimpo === currentLoadedBackup) {
-        currentLoadedBackup = null;
-    }
+    try {
+        await fetch('/api/backups', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: currentUserId, nomeCompleto: nome })
+        });
+        
+        // Se apagou o arquivo que estava aberto/selecionado, limpa a memória
+        const nomeLimpo = nome.split('/')[1].replace('.tar.gz', '');
+        if(nomeLimpo === currentLoadedBackup) {
+            currentLoadedBackup = null;
+        }
 
-    carregarBackups();
+        // 1. Atualiza a lista da tela inicial (Downloads)
+        await carregarListaDownloads(); 
+
+        // 2. Atualiza a lista de dentro do terminal (Backups) e o Dropdown
+        await carregarBackups();
+
+        alert('Arquivo apagado.');
+
+    } catch (e) {
+        console.error(e);
+        alert('Erro ao tentar apagar.');
+    }
 };
