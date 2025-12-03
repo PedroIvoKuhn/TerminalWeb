@@ -7,6 +7,7 @@ const setupForm = document.getElementById('setup-form');
 const numMachinesInput = document.getElementById('num-machines');
 
 let myMasterPodName = null;
+let currentLoadedBackup = null;
 const currentUserId = 'devUser'; // Em produção viria do LTI
 const selectBackup = document.getElementById('select-backup');
 
@@ -35,10 +36,13 @@ async function preencherDropdownBackups() {
         const res = await fetch(`/api/backups?userId=${currentUserId}`);
         const arquivos = await res.json();
         
+        // Limpa antes de preencher para não duplicar se chamar de novo
+        selectBackup.innerHTML = '<option value="">-- Começar do Zero (Vazio) --</option>';
+
         arquivos.forEach(arq => {
             const option = document.createElement('option');
             // O nome vem como "aluno_xyz/trabalho.tar.gz". Pegamos só o final.
-            const nomeLimpo = arq.name.split('/')[1]; 
+            const nomeLimpo = arq.name.split('/')[1].replace('.tar.gz', '');
             option.value = nomeLimpo; 
             option.textContent = `📂 ${nomeLimpo} (${(arq.size/1024/1024).toFixed(2)} MB)`;
             selectBackup.appendChild(option);
@@ -56,6 +60,9 @@ setupForm.addEventListener('submit', (e) => {
     const numMachines = parseInt(numMachinesInput.value, 10);
     const mpiImage = document.querySelector('meta[name="mpi-image"]').getAttribute('content');
     const backupName = selectBackup.value;
+    
+    // Define o backup atual ao iniciar
+    currentLoadedBackup = backupName || null;
 
     if (numMachines > 0) {
         // Enviar userId e backupName junto com o pedido de inicio
@@ -70,7 +77,7 @@ setupForm.addEventListener('submit', (e) => {
 });
 
 
-// --- Lógica de Interação com o Terminal (Pós-inicialização) ---
+// --- Lógica de Interação com o Terminal ---
 term.onData(data => {
     socket.emit('input', data);
 });
@@ -108,7 +115,7 @@ socket.on('connect_error', (err) => {
     term.write(`\r\n[ERRO DE CONEXÃO]: ${err.message}`);
 });
 
-// --- LÓGICA DE BACKUP (Cole isso no final do arquivo) ---
+// --- LÓGICA DE BACKUP ---
 
 async function carregarBackups() {
     const lista = document.getElementById('lista-backups');
@@ -116,6 +123,9 @@ async function carregarBackups() {
     if(!lista) return;
 
     lista.innerHTML = 'Carregando...';
+
+    // Atualiza o dropdown também para manter a lista de verificação sincronizada
+    await preencherDropdownBackups();
 
     try {
         const res = await fetch(`/api/backups?userId=${currentUserId}`);
@@ -126,16 +136,45 @@ async function carregarBackups() {
 
         arquivos.forEach(arq => {
             totalSize += arq.size;
+            
+            // Tratamento do nome para exibição limpa e comparação
+            // Se seu backend manda .tar.gz, removemos aqui para ficar bonito
+            // Se o backend já manda limpo, o .replace não faz mal.
+            const nomeRaw = arq.name.split('/')[1]; 
+            // O nome para salvar/deletar (assumindo que o select tem o nome limpo)
+            const nomeParaSalvar = nomeRaw.replace('.tar.gz', '');
+
+            const isAtual = (nomeParaSalvar === currentLoadedBackup);
+
             const li = document.createElement('li');
             li.style.display = 'flex'; 
             li.style.justifyContent = 'space-between';
             li.style.marginBottom = '5px';
-            li.style.background = '#444';
-            li.style.padding = '5px';
+            li.style.padding = '8px';
+            li.style.borderRadius = '4px'; // Um pouco de estilo
             
+            // Destaque visual se for o atual
+            if (isAtual) {
+                li.style.background = 'rgba(40, 167, 69, 0.2)'; 
+                li.style.border = '1px solid #28a745';
+            } else {
+                li.style.background = '#444';
+            }
+            
+            // Botão condicional: Salvar (se for atual) ou Abrir (se for outro)
+            let botaoAcao = '';
+            if (isAtual) {
+                 botaoAcao = `<button onclick="salvarArquivo('${nomeParaSalvar}')" style="background:#28a745; color:white; border:none; cursor:pointer; padding: 2px 8px; margin-right:5px;">💾 Salvar</button>`;
+            } else {
+                 botaoAcao = `<button onclick="restaurar('${nomeParaSalvar}')" style="background:#007bff; color:white; border:none; cursor:pointer; padding: 2px 8px; margin-right:5px;">📂 Abrir</button>`;
+            }
+
             li.innerHTML = `
-                <span>${arq.name.split('/')[1]} <small>(${(arq.size/1024/1024).toFixed(2)} MB)</small></span>
-                <button onclick="deletar('${arq.name}')" style="background:#dc3545; color:white; border:none; cursor:pointer; padding: 2px 8px;">X</button>
+                <span style="${isAtual ? 'font-weight:bold' : ''}">${nomeParaSalvar} <small>(${(arq.size/1024/1024).toFixed(2)} MB)</small></span>
+                <div>
+                    ${botaoAcao}
+                    <button onclick="deletar('${arq.name}')" style="background:#dc3545; color:white; border:none; cursor:pointer; padding: 2px 8px;">X</button>
+                </div>
             `;
             lista.appendChild(li);
         });
@@ -147,41 +186,90 @@ async function carregarBackups() {
     }
 }
 
-// Botão Salvar
-const btnSalvar = document.getElementById('btn-salvar');
-if(btnSalvar) {
-    btnSalvar.addEventListener('click', async () => {
-        const nomeInput = document.getElementById('nome-backup');
-        const nome = nomeInput.value;
+// --- FUNÇÃO DE SALVAR GLOBAL ---
+window.salvarArquivo = async function(nomeAlvo) {
+    if(!myMasterPodName) return alert('Erro: Pod não conectado.');
+    
+    try {
+        const res = await fetch('/api/backups', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                userId: currentUserId, 
+                podName: myMasterPodName, 
+                nomeArquivo: nomeAlvo 
+            })
+        });
         
-        if(!nome || !myMasterPodName) return alert('Erro: Nome vazio ou pod não conectado.');
+        const json = await res.json();
+        
+        if(json.error) alert('Erro: ' + json.error);
+        else {
+            alert('Salvo com sucesso!');
+            
+            // 1. Atualiza a variável local para saber que estamos neste arquivo
+            currentLoadedBackup = nomeAlvo;
+            
+            // 2. Avisa o servidor (ESSENCIAL PARA O AUTO-SAVE FUNCIONAR)
+            socket.emit('update-active-backup', nomeAlvo);
 
-        btnSalvar.innerText = 'Salvando...';
-        btnSalvar.disabled = true;
+            // 3. Atualiza a lista visualmente
+            carregarBackups();
+            
+            // 4. Limpa o campo de texto se tiver algo escrito
+            const inputNovo = document.getElementById('nome-backup');
+            if(inputNovo) inputNovo.value = '';
+        }
+    } catch(e) { 
+        alert('Erro de conexão ao salvar.'); 
+    }
+};
+
+// --- CONFIGURAÇÃO DO BOTÃO "SALVAR NOVO" ---
+const btnSalvarNovo = document.getElementById('btn-salvar-novo');
+
+if(btnSalvarNovo) {
+    btnSalvarNovo.addEventListener('click', () => {
+        let nome = document.getElementById('nome-backup').value;
         
-        try {
-            const res = await fetch('/api/backups', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId: currentUserId, podName: myMasterPodName, nomeArquivo: nome })
-            });
+        if(!nome) return alert("Digite um nome para o novo arquivo.");
+        
+        nome = nome.trim(); // Limpa espaços
+
+        // --- VERIFICAÇÃO DE EXISTÊNCIA ---
+        // Varre o dropdown para ver se esse nome já existe
+        const jaExiste = Array.from(selectBackup.options).some(o => o.value === nome);
+
+        if (jaExiste) {
+            // Se já existe, interrompe tudo e pede confirmação explícita
+            const confirmar = confirm(`O arquivo "${nome}" JÁ EXISTE!\n\nSe você continuar, o conteúdo antigo será APAGADO e substituído pelo atual.\n\nDeseja SOBRESCREVER?`);
             
-            const json = await res.json();
-            
-            if(json.error) alert('Erro: ' + json.error);
-            else {
-                alert('Salvo com sucesso!');
-                carregarBackups();
-                nomeInput.value = ''; // Limpa o campo
-            }
-        } catch(e) {
-            alert('Erro de conexão ao salvar.');
+            if (!confirmar) return; // Se cancelar, para aqui. Não salva nada.
         }
 
-        btnSalvar.innerText = 'Salvar Agora';
-        btnSalvar.disabled = false;
+        // Se não existe (ou se o usuário confirmou que quer sobrescrever), chama o salvar
+        window.salvarArquivo(nome);
     });
 }
+
+// --- FUNÇÃo RESTAURAR ---
+window.restaurar = async (nome) => {
+    if(!confirm(`Carregar conteúdo de "${nome}"? Isso mistura com os arquivos atuais.`)) return;
+    
+    try {
+        const res = await fetch('/api/backups/restore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: currentUserId, podName: myMasterPodName, nomeArquivo: nome })
+        });
+        const json = await res.json();
+        if(json.error) alert(json.error);
+        else {
+            alert("Conteúdo adicionado!");
+            socket.emit('input', 'ls -la\r'); // Força um ls no terminal
+        }
+    } catch(e) { alert("Erro ao restaurar."); }
+};
 
 // Função global para deletar
 window.deletar = async (nome) => {
@@ -191,5 +279,12 @@ window.deletar = async (nome) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: currentUserId, nomeCompleto: nome })
     });
+    
+    // Se apagou o arquivo que estava aberto, reseta o estado
+    const nomeLimpo = nome.split('/')[1].replace('.tar.gz', '');
+    if(nomeLimpo === currentLoadedBackup) {
+        currentLoadedBackup = null;
+    }
+
     carregarBackups();
 };

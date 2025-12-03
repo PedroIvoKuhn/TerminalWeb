@@ -5,10 +5,16 @@ const minioService = require('./minioService');
 
 module.exports = (io) => {
     io.on('connection', (socket) => {
+        socket.data.activeBackupName = null;
+        socket.data.userId = null;
         socket.on('start-session', async ({numMachines, mpiImage, userId, backupName}) => {
             const jobId = `mpi-job-${socket.id.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
             const secretName = `ssh-keys-${jobId}`;
+            // Guardamos os dados importantes na memória do socket
             socket.data.jobId = jobId;
+            socket.data.userId = userId;
+            // Se ele começou com um arquivo, esse é o ativo. Se começou do zero, é null.
+            socket.data.activeBackupName = backupName || null;
 
             socket.emit('output', `\r\nIniciando ${numMachines} nós para o job ${jobId} usando a imagem ${mpiImage}...\r\n`);
             
@@ -20,6 +26,7 @@ module.exports = (io) => {
                 // Criar a infraestrutura
                 const { masterPodName } = await k8sService.createClusterResources(jobId, numMachines, mpiImage, keys);
                 socket.emit('output', `Pods criados. Aguardando o nó mestre (${masterPodName}) ficar pronto...\r\n`);
+                socket.data.masterPodName = masterPodName;
 
                 // Esperar ficar pronto
                 await k8sService.waitForPodRunning(masterPodName);
@@ -75,14 +82,35 @@ module.exports = (io) => {
             } catch (err) {
                 console.error('Erro no ciclo de vida do Pod:', err);
                 socket.emit('output', `\r\n[ERRO DO BACKEND]: ${err.message}\r\nIniciando limpeza...`);
-                await k8sService.cleanupJob(jobId, secretName);
+                socket.disconnect();
             }
         });
 
+        socket.on('update-active-backup', (novoNome) => {
+            console.log(`[Socket] Backup ativo atualizado para: ${novoNome}`);
+            socket.data.activeBackupName = novoNome;
+        });
+
         socket.on('disconnect', async () => {
-            if (socket.data.jobId) {
-                const secretName = `ssh-keys-${socket.data.jobId}`;
-                await k8sService.cleanupJob(socket.data.jobId, secretName);
+            const { jobId, userId, activeBackupName, masterPodName } = socket.data;
+
+            if (jobId) {
+                console.log(`[Disconnect] Encerrando sessão do Job ${jobId}`);
+
+                // --- AUTO-SAVE ---
+                if (userId && activeBackupName && masterPodName) {
+                    console.log(`[Auto-Save] Salvando automaticamente em: ${activeBackupName}`);
+                    try {
+                        // Tenta salvar antes de destruir
+                        await minioService.salvarBackup(userId, masterPodName, activeBackupName);
+                        console.log(`[Auto-Save] Sucesso!`);
+                    } catch (err) {
+                        console.error(`[Auto-Save] Falha ao salvar no encerramento:`, err.message);
+                    }
+                }
+
+                const secretName = `ssh-keys-${jobId}`;
+                await k8sService.cleanupJob(jobId, secretName);
             }
         });
     });

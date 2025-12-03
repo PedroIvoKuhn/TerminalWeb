@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Web Terminal MPI</title>
     <meta name="mpi-image" content="{{MPI_IMAGE}}">
+    <meta name="user-id" content="{{USER_ID}}">
     <link rel="stylesheet" href="/xterm/css/xterm.css" />
     <style>
         body { background-color: #2d2d2d; color: #f1f1f1; padding: 20px; font-family: sans-serif; }
@@ -43,14 +44,21 @@
         <hr> <div id="terminal"></div>
     </div>
 
-    <div id="backup-ui" style="display:none; margin: 15px 0; background: #333; padding: 10px; border-radius: 5px;">
-        <h3 style="margin-top:0;">📂 Meus Arquivos</h3>
-        <ul id="lista-backups" style="list-style: none; padding-left: 0; max-height: 100px; overflow-y: auto;"></ul>
-        <div style="display: flex; gap: 10px;">
-            <input type="text" id="nome-backup" placeholder="Nome do backup (ex: trab1)" style="flex:1;">
-            <button id="btn-salvar" style="background: #28a745; color: white; border: none; padding: 5px 15px; cursor: pointer;">Salvar Agora</button>
+    <div id="backup-ui" style="display:none; margin: 15px 0; background: #2d2d2d; padding: 15px; border-radius: 8px; border: 1px solid #444;">
+        
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #555; padding-bottom: 10px; margin-bottom: 10px;">
+            <h3 style="margin: 0; font-size: 1.1em;">📂 Meus Arquivos</h3>
+            <small id="status-cota" style="color: #aaa; background: #222; padding: 5px 10px; border-radius: 15px; border: 1px solid #444; font-size: 0.85em;">
+                Calculando...
+        </small>
         </div>
-        <small id="status-cota" style="color: #ccc;"></small>
+
+        <ul id="lista-backups" style="list-style: none; padding-left: 0; max-height: 200px; overflow-y: auto; background: #1e1e1e; border-radius: 4px; padding: 5px; margin-bottom: 15px;"></ul>
+
+        <div style="display: flex; gap: 10px;">
+            <input type="text" id="nome-backup" placeholder="Nome do novo arquivo..." style="flex:1; padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: white;">
+            <button id="btn-salvar-novo" style="background: #28a745; color: white; border: none; padding: 8px 15px; cursor: pointer; border-radius: 4px; font-weight: bold;">Salvar Novo</button>
+        </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>

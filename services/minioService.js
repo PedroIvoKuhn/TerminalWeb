@@ -50,57 +50,55 @@ async function deletarArquivo(userId, nomeCompleto) {
 }
 
 async function restaurarBackup(userId, podName, nomeArquivo) {
-    const nomeFinal = `aluno_${userId}/${nomeArquivo}`;
+    // Garante que o nome tenha .tar.gz para buscar no MinIO
+    let nomeFinal = nomeArquivo;
+    if (!nomeFinal.endsWith('.tar.gz')) {
+        nomeFinal += '.tar.gz';
+    }
+
+    const pathNoBucket = `aluno_${userId}/${nomeFinal}`;
     
-    // Pega o nome limpo sem .tar.gz (ex: "trabalho1")
-    const nomePasta = nomeArquivo.replace('.tar.gz', '');
+    // Restauramos direto na raiz (/home/mpiuser)
+    const command = ['tar', 'xzf', '-', '-C', '/home/mpiuser'];
 
-    // 1. Cria uma pasta para não misturar os arquivos
-    // O comando agora é: mkdir -p pasta && tar ... -C pasta
-    const command = [
-        'bash', '-c', 
-        `mkdir -p /home/mpiuser/"${nomePasta}" && tar xzf - -C /home/mpiuser/"${nomePasta}"`
-    ];
+    try {
+        const dataStream = await minioClient.getObject(BUCKET_NAME, pathNoBucket);
 
-    const dataStream = await minioClient.getObject(BUCKET_NAME, nomeFinal);
+        await k8sExec.exec(
+            namespace, podName, 'mpi-container', command,
+            null, process.stderr, dataStream, false
+        );
 
-    await k8sExec.exec(
-        namespace,
-        podName,
-        'mpi-container',
-        command,
-        null,
-        process.stderr,
-        dataStream,
-        false
-    );
-
-    return { message: "Restaurado na pasta: " + nomePasta };
+        return { message: "Arquivos restaurados na home!" };
+    } catch (e) {
+        console.error("Erro restore:", e);
+        throw e;
+    }
 }
 
+// --- SALVAR ---
 async function salvarBackup(userId, podName, nomeArquivo) {
     // 1. Checa cota
     const { permitido } = await verificarCota(userId);
     if (!permitido) throw new Error('Cota de 100MB excedida.');
 
-    const nomeFinal = `aluno_${userId}/${nomeArquivo}.tar.gz`;
+    const nomeLimpo = nomeArquivo.replace(/(\.tar\.gz)+$/g, '');
+    const nomeFinal = `aluno_${userId}/${nomeLimpo}.tar.gz`;
+    
     const passThrough = new stream.PassThrough();
 
-    // 2. Comando tar dentro do pod
-    // AVISO: 'mpiuser' é o usuário do seu Dockerfile. Se mudar lá, mude aqui.
-    const command = ['tar', 'czf', '-', '/home/mpiuser']; 
+    const command = [
+        'tar', 'czf', '-', 
+        '-C', '/home/mpiuser', 
+        '--exclude=*.tar.gz', 
+        '.'
+    ];
 
     try {
-        // Conecta a saída do Pod (stdout) à entrada do MinIO
+        // Executa o tar no Pod e joga a saída (stream) direto para o MinIO
         await k8sExec.exec(
-            namespace,
-            podName,
-            'mpi-container',
-            command,
-            passThrough, 
-            process.stderr,
-            process.stdin,
-            false
+            namespace, podName, 'mpi-container', command,
+            passThrough, process.stderr, process.stdin, false
         );
 
         await minioClient.putObject(BUCKET_NAME, nomeFinal, passThrough);
