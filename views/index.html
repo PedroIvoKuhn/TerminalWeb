@@ -14,6 +14,7 @@
     <div id="setup-container">
         <h2>Configuração do Cluster</h2>
         <p>Você está usando a imagem: {{MPI_IMAGE}}</p>
+        <p>Cada sessão tem um tempo máximo de 2 horas</p>
         <p>Quantos nós (máquinas) você deseja para sua aplicação MPI?</p>
         <form id="setup-form">
             <input type="number" id="num-machines" value="2" min="1" required>
@@ -29,6 +30,22 @@
         </div>
         <hr> <div id="terminal"></div>
     </div>
+
+<div id="timer-bar">
+    Tempo Restante:&nbsp;<span id="countdown-display">--:--:--</span>
+</div>
+
+<div id="session-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center;">
+    <div style="background: #333; padding: 30px; border-radius: 8px; text-align: center; border: 2px solid #f39c12; max-width: 400px; color: white;">
+        <h2 style="color: #f39c12;">⚠️ A sessão vai expirar!</h2>
+        <p>Para liberar recursos, sua sessão será encerrada em breve.</p>
+        <p>Você ainda está utilizando?</p>
+        <div style="margin-top: 20px;">
+            <button id="btn-extend" style="background: #27ae60; color: white; padding: 10px 20px; border: none; cursor: pointer; border-radius: 4px; margin-right: 10px; font-size: 1rem;">Sim, preciso de mais tempo</button>
+            <button id="btn-ignore" style="background: #e74c3c; color: white; padding: 10px 20px; border: none; cursor: pointer; border-radius: 4px; font-size: 1rem;">Não, pode fechar</button>
+        </div>
+    </div>
+</div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="/xterm/lib/xterm.js"></script>

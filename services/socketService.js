@@ -1,6 +1,7 @@
 const { k8sExec, namespace } = require('../config/kubernetes');
 const k8sService = require('./k8sService');
 const sshService = require('./sshService');
+const sessionService = require('./sessionService');
 
 module.exports = (io) => {
     io.on('connection', (socket) => {
@@ -22,6 +23,9 @@ module.exports = (io) => {
 
                 // Esperar ficar pronto
                 await k8sService.waitForPodRunning(masterPodName);
+
+                const expiresAt = sessionService.startSession(jobId, socket);
+                socket.emit('session:update', { expiresAt: expiresAt });
 
                 const machineAliases = ['master'];
                 for (let i = 1; i < numMachines; i++) {
@@ -66,7 +70,15 @@ module.exports = (io) => {
             }
         });
 
+        socket.on('session:extend-response', () => {
+            const newExpiresAt = sessionService.extendSession(socket.data.jobId);
+                if (newExpiresAt) {
+                    socket.emit('session:update', { expiresAt: newExpiresAt });
+                }
+        });
+
         socket.on('disconnect', async () => {
+            sessionService.clearSession(socket.data.jobId);
             if (socket.data.jobId) {
                 const secretName = `ssh-keys-${socket.data.jobId}`;
                 await k8sService.cleanupJob(socket.data.jobId, secretName);
