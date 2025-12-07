@@ -93,4 +93,43 @@ app.get('/api/download', async (req, res) => {
     }
 });
 
+// Download do arquivo inteiro (.tar.gz)
+app.get('/api/download', async (req, res) => {
+    try {
+        const { userId, nomeArquivo } = req.query;
+        const stream = await minioService.obterArquivoParaDownload(userId, nomeArquivo);
+        res.attachment(nomeArquivo.endsWith('.tar.gz') ? nomeArquivo : nomeArquivo + '.tar.gz');
+        stream.pipe(res);
+    } catch(e) { res.status(500).send("Erro download."); }
+});
+
+// Listar conteúdo interno (Árvore)
+app.get('/api/backups/content', async (req, res) => {
+    try {
+        const conteudo = await minioService.listarConteudoBackup(req.query.userId, req.query.nomeArquivo);
+        res.json(conteudo);
+    } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+// Download de 1 arquivo interno
+app.get('/api/backups/download-single', async (req, res) => {
+    try {
+        const { userId, nomeBackup, file } = req.query;
+        const stream = await minioService.baixarArquivoInterno(userId, nomeBackup, file);
+        res.attachment(file.split('/').pop());
+        stream.pipe(res);
+    } catch(e) { res.status(500).send("Erro extração."); }
+});
+
+// Download de 1 pasta interna
+app.get('/api/backups/download-folder', async (req, res) => {
+    try {
+        const { userId, nomeBackup, folder } = req.query;
+        const stream = await minioService.baixarPastaInterna(userId, nomeBackup, folder);
+        const folderName = folder.replace(/\/$/, '').split('/').pop();
+        res.attachment(`${folderName}.tar.gz`);
+        stream.pipe(res);
+    } catch(e) { res.status(500).send("Erro compactação."); }
+});
+
 start();

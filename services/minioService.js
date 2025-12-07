@@ -2,6 +2,8 @@
 const Minio = require('minio');
 const { k8sExec, namespace } = require('../config/kubernetes');
 const stream = require('stream');
+const tar = require('tar-stream');
+const zlib = require('zlib');
 
 // Configuração do MinIO (pegando do .env)
 const minioClient = new Minio.Client({
@@ -90,7 +92,8 @@ async function salvarBackup(userId, podName, nomeArquivo) {
     const command = [
         'tar', 'czf', '-', 
         '-C', '/home/mpiuser', 
-        '--exclude=*.tar.gz', 
+        '--exclude=*.tar.gz',
+        '--exclude=.ssh',
         '.'
     ];
 
@@ -121,4 +124,86 @@ async function obterArquivoParaDownload(userId, nomeArquivo) {
     }
 }
 
-module.exports = { listarArquivos, salvarBackup, deletarArquivo, restaurarBackup, obterArquivoParaDownload};
+async function listarConteudoBackup(userId, nomeArquivo) {
+    let nomeFinal = `aluno_${userId}/${nomeArquivo}`;
+    if (!nomeFinal.endsWith('.tar.gz')) nomeFinal += '.tar.gz';
+
+    return new Promise(async (resolve, reject) => {
+        try {
+            const fileStream = await minioClient.getObject(BUCKET_NAME, nomeFinal);
+            const extract = tar.extract();
+            const files = [];
+
+            extract.on('entry', (header, stream, next) => {
+                files.push({ name: header.name, type: header.type, size: header.size });
+                stream.on('end', next);
+                stream.resume(); 
+            });
+
+            extract.on('finish', () => resolve(files));
+            extract.on('error', (err) => reject(err));
+
+            fileStream.pipe(zlib.createGunzip()).pipe(extract);
+        } catch (e) { reject(e); }
+    });
+}
+
+async function baixarArquivoInterno(userId, nomeBackup, arquivoAlvo) {
+    let nomeFinal = `aluno_${userId}/${nomeBackup}`;
+    if (!nomeFinal.endsWith('.tar.gz')) nomeFinal += '.tar.gz';
+
+    return new Promise(async (resolve, reject) => {
+        try {
+            const fileStream = await minioClient.getObject(BUCKET_NAME, nomeFinal);
+            const extract = tar.extract();
+            let found = false;
+
+            extract.on('entry', (header, stream, next) => {
+                if (header.name === arquivoAlvo) {
+                    found = true;
+                    resolve(stream); 
+                } else {
+                    stream.on('end', next);
+                    stream.resume();
+                }
+            });
+
+            extract.on('finish', () => {
+                if (!found) reject(new Error('Arquivo não encontrado.'));
+            });
+
+            fileStream.pipe(zlib.createGunzip()).pipe(extract);
+        } catch (e) { reject(e); }
+    });
+}
+
+async function baixarPastaInterna(userId, nomeBackup, pastaAlvo) {
+    let nomeFinal = `aluno_${userId}/${nomeBackup}`;
+    if (!nomeFinal.endsWith('.tar.gz')) nomeFinal += '.tar.gz';
+
+    return new Promise(async (resolve, reject) => {
+        try {
+            const fileStream = await minioClient.getObject(BUCKET_NAME, nomeFinal);
+            const extract = tar.extract();
+            const pack = tar.pack(); 
+
+            extract.on('entry', (header, stream, next) => {
+                if (header.name.startsWith(pastaAlvo)) {
+                    stream.pipe(pack.entry(header, next));
+                } else {
+                    stream.on('end', next);
+                    stream.resume();
+                }
+            });
+
+            extract.on('finish', () => pack.finalize());
+            extract.on('error', (err) => reject(err));
+
+            fileStream.pipe(zlib.createGunzip()).pipe(extract);
+            resolve(pack.pipe(zlib.createGzip()));
+
+        } catch (e) { reject(e); }
+    });
+}
+
+module.exports = { listarArquivos, salvarBackup, deletarArquivo, restaurarBackup, obterArquivoParaDownload, listarConteudoBackup, baixarArquivoInterno, baixarPastaInterna };
