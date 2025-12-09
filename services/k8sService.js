@@ -143,6 +143,10 @@ async function createClusterResources(jobId, numMachines, mpiImage, keys) {
                     image: mpiImage,
                     imagePullPolicy: 'IfNotPresent',
                     resources: {
+                        request: {
+                            cpu: '100m',
+                            memory: '64Mi'
+                        },
                         limits: {
                             cpu: '500m',
                             memory: '512Mi'
