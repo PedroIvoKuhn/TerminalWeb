@@ -22,9 +22,8 @@ function generateSshConfig(numMachines, jobId, masterPodName, serviceName) {
     let sshConfig = '';
     for (let i = 0; i < numMachines; i++) {
         const isMaster = i === 0;
-        const podName = isMaster ? masterPodName : `worker-${i}-${jobId}`;
         const alias = isMaster ? 'master' : `worker-${i}`;
-        const fqdn = `${podName}.${serviceName}.${namespace}.svc.cluster.local`;
+        const fqdn = `${alias}.${serviceName}.${namespace}.svc.cluster.local`;
         sshConfig += `Host ${alias}\n    HostName ${fqdn}\n    User mpiuser\n\n`;
     }
     sshConfig += `Host *\n    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null\n`;
@@ -88,7 +87,7 @@ async function createClusterResources(jobId, numMachines, mpiImage, keys) {
     const secretName = `ssh-keys-${jobId}`;
 
     // Cria o secret
-    const sshConfig = generateSshConfig(numMachines, jobId, masterPodName, secretName);
+    const sshConfig = generateSshConfig(numMachines, jobId, masterPodName, serviceName);
     const secretManifest = getSecretManifest(secretName, keys.privateKey, keys.publicKey, sshConfig);
     await k8sApi.createNamespacedSecret(namespace, secretManifest);
 
@@ -104,17 +103,18 @@ async function createClusterResources(jobId, numMachines, mpiImage, keys) {
     // Criar os Pods
     const podPromises = [];
     for (let i = 0; i < numMachines; i++) {
-        const podName = i === 0 ? masterPodName : `worker-${i}-${jobId}`;
+        const podK8sName = i === 0 ? masterPodName : `worker-${i}-${jobId}`;
+        const networkHostname = i === 0 ? 'master' : `worker-${i}`;
         const podManifest = {
             metadata: {
-                name: podName,
+                name: podK8sName,
                 labels: { 'mpi-job-id': jobId, 'mpi-role': i === 0 ? 'master' : 'worker' }
             },
             spec: {
                 securityContext: {
                     fsGroup: 1000
                 },
-                hostname: podName,
+                hostname: networkHostname,
                 subdomain: serviceName,
                 serviceAccountName: 'terminal-backend-sa',
                 containers: [{
