@@ -31,7 +31,7 @@ module.exports = (io) => {
                 socket.emit('session-ready', { aliases: machineAliases });
 
                 socket.emit('output', `\r\n✅ Conectado! Apelidos SSH configurados.\r\n`);
-                socket.emit('output', `Tente: ssh worker-1 hostname\r\n\r\n`);
+                socket.emit('output', `Tente: ssh worker-1 \r\n\r\n`);
 
                 const command = ['/bin/bash'];
                 const execWs = await k8sExec.exec(

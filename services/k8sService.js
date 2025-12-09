@@ -117,10 +117,37 @@ async function createClusterResources(jobId, numMachines, mpiImage, keys) {
                 hostname: networkHostname,
                 subdomain: serviceName,
                 serviceAccountName: 'terminal-backend-sa',
+                affinity: {
+        podAntiAffinity: { // Código para a aula, Balanceando a carga
+            preferredDuringSchedulingIgnoredDuringExecution: [
+                {
+                    weight: 100,
+                    podAffinityTerm: {
+                        labelSelector: {
+                            matchExpressions: [
+                                {
+                                    key: "mpi-job-id",
+                                    operator: "In",
+                                    values: [jobId] // Tenta espalhar pods do MESMO job
+                                }
+                            ]
+                        },
+                        topologyKey: "kubernetes.io/hostname" // Espalha baseada no nome do host (máquina diferente)
+                    }
+                }
+            ]
+        }
+    },
                 containers: [{
                     name: 'mpi-container',
                     image: mpiImage,
                     imagePullPolicy: 'IfNotPresent',
+                    resources: {
+                        limits: {
+                            cpu: '500m',
+                            memory: '512Mi'
+                        }
+                    },
                     volumeMounts: [
                         {
                             name: 'ssh-keys-volume',
