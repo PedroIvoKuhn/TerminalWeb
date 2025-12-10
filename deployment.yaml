@@ -46,7 +46,17 @@ metadata:
   annotations:
     # Aumenta o tamanho máximo do corpo para uploads LTI, se necessário
     nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    # Diz ao cert-manager quem deve emitir o certificado
+    cert-manager.io/cluster-issuer: "letsencrypt-prod" 
+    # Força o redirecionamento de HTTP para HTTPS
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
+  ingressClassName: public 
+  # Configuração do certificado
+  tls:
+  - hosts:
+    - clusterlups.inf.ufpel.edu.br
+    secretName: terminal-web-tls
   rules:
   - host: clusterlups.inf.ufpel.edu.br
     http:
