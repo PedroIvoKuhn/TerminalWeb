@@ -1,0 +1,83 @@
+# Base igual ao do exemplo funcional
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 1. Instalação de dependências básicas + Ferramentas (C++, Elixir, Utils)
+# Adicionei 'locales' para evitar erros de terminal
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    g++ \
+    openssh-server \
+    sudo \
+    git \
+    curl \
+    wget \
+    iputils-ping \
+    nano \
+    vim \
+    tmux \
+    unzip \
+    ca-certificates \
+    locales \
+    erlang \
+    elixir && \
+    rm -rf /var/lib/apt/lists/*
+
+# Configura locale (importante para Rust/Elixir não reclamarem)
+RUN locale-gen en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US:en
+ENV LC_ALL=en_US.UTF-8
+
+# 2. Instalação do Rust (GLOBAL)
+# Instalamos em /usr/local para que o 'mpiuser' consiga acessar sem problemas
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path && \
+    chmod -R a+w $RUSTUP_HOME $CARGO_HOME && \
+    rustc --version && \
+    cargo --version
+
+# 3. Instalação do Go
+# Usando 1.23.4 (estável). Se quiser arriscar a 1.24, mude a variável.
+ENV GOLANG_VERSION=1.23.4
+RUN wget https://go.dev/dl/go${GOLANG_VERSION}.linux-amd64.tar.gz && \
+    rm -rf /usr/local/go && tar -C /usr/local -xzf go${GOLANG_VERSION}.linux-amd64.tar.gz && \
+    rm -f go${GOLANG_VERSION}.linux-amd64.tar.gz
+ENV PATH="/usr/local/go/bin:${PATH}"
+RUN go version
+
+# 4. Configuração do Usuário (IGUAL AO SEU EXEMPLO MPI)
+# Mantive 'mpiuser' pois seu Kubernetes monta volumes em /home/mpiuser
+RUN groupadd -g 1000 mpiuser && \
+    useradd -u 1000 -g 1000 -m -s /bin/bash mpiuser && \
+    usermod -aG sudo mpiuser && \
+    echo "mpiuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# 5. Configuração do SSH
+# Mantendo a lógica do seu exemplo (Senha NÃO, Chave SIM)
+RUN sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config && \
+    sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+
+# Prepara pasta .ssh (O Kubernetes vai montar arquivos aqui por cima depois, mas é bom garantir a pasta)
+RUN mkdir -p /home/mpiuser/.ssh && \
+    chmod 700 /home/mpiuser/.ssh && \
+    chown -R mpiuser:mpiuser /home/mpiuser/.ssh
+
+# Diretório necessário para o daemon do SSH
+RUN mkdir -p /var/run/sshd && chmod 0755 /var/run/sshd
+
+# 6. Define usuário e diretório de trabalho
+USER mpiuser
+WORKDIR /home/mpiuser
+
+EXPOSE 22
+
+# 7. Comando final
+# Aqui o SUDO é necessário e vai funcionar porque estamos rodando como 'mpiuser' 
+# e configuramos o sudoers lá em cima.
+CMD ["/bin/bash", "-c", "sudo /usr/sbin/sshd -D"]
