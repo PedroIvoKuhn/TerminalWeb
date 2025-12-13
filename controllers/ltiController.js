@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const lti = require('ltijs').Provider;
+const k8sService = require('../services/k8sService');
 
 // Função privada
 
@@ -23,6 +24,7 @@ async function setup(app) {
         app.get('/', (req, res) => {
             const userName = "userDev";
             const mpiImage = process.env.DEFAULT_MPI_IMAGE;
+            k8sService.triggerPrePull(mpiImage).catch(console.error);
             renderTemplate(res, userName, mpiImage);
         });
         return;
@@ -72,6 +74,7 @@ async function setup(app) {
         if (custImagem && custImagem.toLowerCase() !== 'default') {              
             mpiImage = custImagem;
         }
+        k8sService.triggerPrePull(mpiImage).catch(console.error);
         renderTemplate(res, userName, mpiImage);
     });
 }

@@ -219,4 +219,53 @@ async function cleanupJob(jobId, secretName) {
     }
 }
 
-module.exports = { waitForPodRunning, cleanupJob, createClusterResources };
+async function triggerPrePull(imageName) {
+    // Cria um nome seguro para o k8s (remove caracteres especiais da imagem)
+    const cleanImageName = imageName.replace(/[^a-z0-9]/g, '-').toLowerCase().slice(0, 40);
+    const dsName = `prepull-${cleanImageName}`;
+
+    const daemonSetManifest = {
+        apiVersion: 'apps/v1',
+        kind: 'DaemonSet',
+        metadata: { name: dsName, labels: { app: 'pre-puller' } },
+        spec: {
+            selector: { matchLabels: { name: dsName } },
+            template: {
+                metadata: { labels: { name: dsName } },
+                spec: {
+                    containers: [{
+                        name: 'loader',
+                        image: imageName,
+                        command: ["/bin/sh", "-c", "echo 'Imagem em cache' && sleep 3600"],
+                        imagePullPolicy: 'Always',
+                        resources: {
+                            requests: { cpu: '10m', memory: '10Mi' } // Mínimo possível
+                        }
+                    }],
+                    terminationGracePeriodSeconds: 0
+                }
+            }
+        }
+    };
+
+    try {
+        await k8sApi.createNamespacedDaemonSet(namespace, daemonSetManifest);
+        // console.log(`[Pre-Pull] Iniciado para ${imageName}`);
+        
+        // Define um tempo para deletar o DaemonSet (limpeza automática)
+        setTimeout(async () => {
+            try {
+                await k8sApi.deleteNamespacedDaemonSet(dsName, namespace);
+                // console.log(`[Pre-Pull] Limpeza concluída para ${dsName}`);
+            } catch (e) { /* Ignora erro na deleção */ }
+        }, 120000); // Deleta após 2 minutos (tempo suficiente para baixar)
+
+    } catch (err) {
+        // Se der erro 409 (AlreadyExists), tudo bem, significa que já está baixando
+        if (err.body && err.body.code !== 409) {
+            console.error(`[Pre-Pull] Erro:`, err.body ? err.body.message : err);
+        }
+    }
+}
+
+module.exports = { waitForPodRunning, cleanupJob, createClusterResources, triggerPrePull };
