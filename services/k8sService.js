@@ -141,7 +141,7 @@ async function createClusterResources(jobId, numMachines, mpiImage, keys) {
                 containers: [{
                     name: 'mpi-container',
                     image: mpiImage,
-                    imagePullPolicy: 'IfNotPresent',
+                    imagePullPolicy: 'Always',
                     resources: {
                         requests: {
                             cpu: '200m',
