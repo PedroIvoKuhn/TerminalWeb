@@ -49,7 +49,7 @@ RUN wget https://go.dev/dl/go${GOLANG_VERSION}.linux-amd64.tar.gz && \
     rm -rf /usr/local/go && tar -C /usr/local -xzf go${GOLANG_VERSION}.linux-amd64.tar.gz && \
     rm -f go${GOLANG_VERSION}.linux-amd64.tar.gz
 ENV PATH="/usr/local/go/bin:${PATH}"
-RUN CGO_ENABLED=0
+RUN CGO_ENABLED=1
 ENV GOCACHE=/tmp/gocache
 RUN mkdir -p /tmp/gocache && chmod 777 /tmp/gocache
 RUN go install -v -installsuffix cgo -a std
