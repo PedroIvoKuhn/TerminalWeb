@@ -78,6 +78,11 @@ USER mpiuser
 WORKDIR /home/mpiuser
 
 RUN go install -v std
+# (Opcional) Cria um Hello World bobo e roda só para garantir 
+# que o linker também já fez o trabalho pesado inicial.
+RUN echo 'package main; import "fmt"; func main() { fmt.Println("Go Quente!") }' > warmup.go && \
+    go build warmup.go && \
+    rm warmup.go warmup
 
 EXPOSE 22
 
