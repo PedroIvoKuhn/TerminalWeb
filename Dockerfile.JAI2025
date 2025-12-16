@@ -39,7 +39,8 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path && \
     chmod -R a+w $RUSTUP_HOME $CARGO_HOME && \
     rustc --version && \
-    cargo --version
+    cargo --version && \
+    cargo search rand || true
 
 # 3. Instalação do Go
 # Usando 1.23.4 (estável). Se quiser arriscar a 1.24, mude a variável.
@@ -49,6 +50,10 @@ RUN wget https://go.dev/dl/go${GOLANG_VERSION}.linux-amd64.tar.gz && \
     rm -f go${GOLANG_VERSION}.linux-amd64.tar.gz
 ENV PATH="/usr/local/go/bin:${PATH}"
 RUN go version
+
+ENV GOCACHE=/tmp/gocache
+RUN mkdir -p /tmp/gocache && chmod 777 /tmp/gocache
+RUN go install -v -installsuffix cgo -a std
 
 # 4. Configuração do Usuário (IGUAL AO SEU EXEMPLO MPI)
 # Mantive 'mpiuser' pois seu Kubernetes monta volumes em /home/mpiuser
