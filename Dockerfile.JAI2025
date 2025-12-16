@@ -51,6 +51,13 @@ RUN wget https://go.dev/dl/go${GOLANG_VERSION}.linux-amd64.tar.gz && \
 ENV PATH="/usr/local/go/bin:${PATH}"
 ENV CGO_ENABLED=1
 RUN go version
+RUN mkdir -p /go-cache && chmod 777 /go-cache
+
+# ### CORREÇÃO CRÍTICA 2: APONTAR AS VARIÁVEIS ###
+# GOCACHE: Onde ficam os binários compilados (o que acelera o build)
+# GOMODCACHE: Onde ficam as bibliotecas baixadas da internet
+ENV GOCACHE=/go-cache/build
+ENV GOMODCACHE=/go-cache/mod
 
 # 4. Configuração do Usuário (IGUAL AO SEU EXEMPLO MPI)
 # Mantive 'mpiuser' pois seu Kubernetes monta volumes em /home/mpiuser
