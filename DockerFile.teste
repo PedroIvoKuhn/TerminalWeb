@@ -1,0 +1,42 @@
+# Imagem base: Ubuntu
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Pacotes mínimos: C++20 (g++), editores, SSH e sudo
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    g++ \
+    nano \
+    vim \
+    openssh-server \
+    sudo \
+ && rm -rf /var/lib/apt/lists/*
+
+# Usuário "mpiuser" com sudo sem senha
+RUN groupadd -g 1000 mpiuser && \
+    useradd  -u 1000 -g 1000 -m -s /bin/bash mpiuser && \
+    usermod -aG sudo mpiuser && \
+    echo "mpiuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/mpiuser && \
+    chmod 0440 /etc/sudoers.d/mpiuser
+
+# SSH: chave pública sim, senha não
+RUN sed -i 's/#\?PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
+
+# Garante .ssh e permissões
+RUN mkdir -p /home/mpiuser/.ssh && \
+    chmod 700 /home/mpiuser/.ssh && \
+    chown -R mpiuser:mpiuser /home/mpiuser/.ssh
+
+# Diretório do sshd
+RUN mkdir -p /var/run/sshd && chmod 0755 /var/run/sshd
+
+# Define usuário e diretório de trabalho
+USER mpiuser
+WORKDIR /home/mpiuser
+
+# Porta SSH
+EXPOSE 22
+
+# Mantém o contêiner rodando (sshd em foreground)
+CMD ["/bin/bash", "-c", "sudo /usr/sbin/sshd -D"]

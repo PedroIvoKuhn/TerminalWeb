@@ -5,14 +5,14 @@ const k8sService = require('../services/k8sService');
 
 // Função privada
 
-function renderTemplate(res, userName, mpiImage) {
+function renderTemplate(res, userName, image) {
     const templatePath = path.join(__dirname, '../views', 'index.html');
 
     fs.readFile(templatePath, 'utf8', (err, html) => {
         if (err) return res.status(500).send("Erro ao carregar index.html.");
 
         let finalHtml = html.replace('{{NOME_USUARIO}}', userName);
-        finalHtml = finalHtml.replaceAll('{{MPI_IMAGE}}', mpiImage);
+        finalHtml = finalHtml.replaceAll('{{IMAGE}}', image);
         res.send(finalHtml);
     });
 }
@@ -23,9 +23,9 @@ async function setup(app) {
     if (process.env.NODE_ENV === "development"){
         app.get('/', (req, res) => {
             const userName = "userDev";
-            const mpiImage = process.env.DEFAULT_MPI_IMAGE;
-            k8sService.triggerPrePull(mpiImage).catch(console.error);
-            renderTemplate(res, userName, mpiImage);
+            const image = process.env.DEFAULT_MPI_IMAGE;
+            k8sService.triggerPrePull(image).catch(console.error);
+            renderTemplate(res, userName, image);
         });
         return;
     }
@@ -68,14 +68,14 @@ async function setup(app) {
     lti.onConnect(async (token, req, res) => {
         console.log('Usuário conectado:', token.user);
         const userName = token.user.name || 'Usuário Desconhecido';
-        let mpiImage = process.env.DEFAULT_MPI_IMAGE;
+        let image = process.env.DEFAULT_MPI_IMAGE;
  
         const custImagem = token.platformContext.custom ? token.platformContext.custom.imagem : undefined;
         if (custImagem && custImagem.toLowerCase() !== 'default') {              
-            mpiImage = custImagem;
+            image = custImagem;
         }
-        k8sService.triggerPrePull(mpiImage).catch(console.error);
-        renderTemplate(res, userName, mpiImage);
+        k8sService.triggerPrePull(image).catch(console.error);
+        renderTemplate(res, userName, image);
     });
 }
 

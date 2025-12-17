@@ -4,12 +4,12 @@ const sshService = require('./sshService');
 
 module.exports = (io) => {
     io.on('connection', (socket) => {
-        socket.on('start-session', async ({numMachines, mpiImage}) => {
-            const jobId = `mpi-job-${socket.id.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+        socket.on('start-session', async ({numMachines, image}) => {
+            const jobId = `job-${socket.id.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
             const secretName = `ssh-keys-${jobId}`;
             socket.data.jobId = jobId;
 
-            socket.emit('output', `\r\nIniciando ${numMachines} nós para o job ${jobId} usando a imagem ${mpiImage}...\r\n`);
+            socket.emit('output', `\r\nIniciando ${numMachines} nós para o job ${jobId} usando a imagem ${image}...\r\n`);
             
             try {
                 // Gerar Chaves
@@ -17,7 +17,7 @@ module.exports = (io) => {
                 const keys = await sshService.generateSSHKeys();
 
                 // Criar a infraestrutura
-                const { masterPodName } = await k8sService.createClusterResources(jobId, numMachines, mpiImage, keys);
+                const { masterPodName } = await k8sService.createClusterResources(jobId, numMachines, image, keys);
                 socket.emit('output', `Pods criados. Aguardando o nó mestre (${masterPodName}) ficar pronto...\r\n`);
 
                 // Esperar ficar pronto
@@ -30,14 +30,14 @@ module.exports = (io) => {
 
                 socket.emit('session-ready', { aliases: machineAliases });
 
-                socket.emit('output', `\r\n✅ Conectado! Apelidos SSH configurados.\r\n`);
-                socket.emit('output', `Tente: ssh worker-1 \r\n\r\n`);
+                //socket.emit('output', `\r\n✅ Conectado! Apelidos SSH configurados.\r\n`);
+                //socket.emit('output', `Tente: ssh worker-1 \r\n\r\n`);
 
                 const command = ['/bin/bash'];
                 const execWs = await k8sExec.exec(
                     namespace, 
                     masterPodName, 
-                    'mpi-container', 
+                    'container', 
                     command, 
                     process.stdout, 
                     process.stderr, 

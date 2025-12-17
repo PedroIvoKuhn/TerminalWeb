@@ -16,23 +16,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     vim \
     && rm -rf /var/lib/apt/lists/*
 
-RUN groupadd -g 1000 mpiuser && \
-    useradd -u 1000 -g 1000 -m -s /bin/bash mpiuser && \
-    usermod -aG sudo mpiuser && \
-    echo "mpiuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+RUN groupadd -g 1000 aluno && \
+    useradd -u 1000 -g 1000 -m -s /bin/bash aluno && \
+    usermod -aG sudo aluno && \
+    echo "aluno ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 RUN sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config && \
     sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config && \
     sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
 
-RUN mkdir -p /home/mpiuser/.ssh && \
-    chmod 700 /home/mpiuser/.ssh && \
-    chown -R mpiuser:mpiuser /home/mpiuser/.ssh
+RUN mkdir -p /home/aluno/.ssh && \
+    chmod 700 /home/aluno/.ssh && \
+    chown -R aluno:aluno /home/aluno/.ssh
 
 RUN mkdir -p /var/run/sshd && chmod 0755 /var/run/sshd
 
-USER mpiuser
-WORKDIR /home/mpiuser
+USER aluno
+WORKDIR /home/aluno
 
 EXPOSE 22
 

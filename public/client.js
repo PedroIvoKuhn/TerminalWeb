@@ -30,10 +30,10 @@ function initializeTerminal() {
 setupForm.addEventListener('submit', (e) => {
     e.preventDefault(); 
     const numMachines = parseInt(numMachinesInput.value, 10);
-    const mpiImage = document.querySelector('meta[name="mpi-image"]').getAttribute('content');
+    const image = document.querySelector('meta[name="image"]').getAttribute('content');
 
     if (numMachines > 0) {
-        socket.emit('start-session', { numMachines: numMachines, mpiImage: mpiImage });
+        socket.emit('start-session', { numMachines: numMachines, image: image });
         initializeTerminal();
     }
 });
