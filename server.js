@@ -21,8 +21,7 @@ app.use('/xterm-addon-fit', express.static(path.join(__dirname, 'node_modules/xt
 
 // Rota: Listar Backups
 app.get('/api/backups', async (req, res) => {
-    // O ideal é pegar o ID do aluno via sessão LTI. 
-    // Por enquanto, vou pegar via Query Param para agilizar seu teste.
+
     const userId = req.query.userId || 'anonimo'; 
     try {
         const arquivos = await minioService.listarArquivos(userId);

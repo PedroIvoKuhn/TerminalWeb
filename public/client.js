@@ -8,10 +8,9 @@ const numMachinesInput = document.getElementById('num-machines');
 
 let myMasterPodName = null;
 let currentLoadedBackup = null;
-const currentUserId = 'devUser'; // Em produção viria do LTI
+const currentUserId = 'devUser';
 const selectBackup = document.getElementById('select-backup');
 
-// Cache para guardar a estrutura dos arquivos e não carregar toda hora
 let cacheArquivos = {}; 
 
 // --- Configuração do Terminal ---
@@ -34,14 +33,19 @@ async function carregarListaDownloads() {
         const arquivos = await res.json();
 
         // 1. Preenche o Dropdown (Select)
-        select.innerHTML = '<option value="">-- Começar do Zero (Vazio) --</option>';
-        arquivos.forEach(arq => {
-            const nomeLimpo = arq.name.split('/')[1].replace('.tar.gz', '');
-            const option = document.createElement('option');
-            option.value = nomeLimpo;
-            option.textContent = `📂 ${nomeLimpo}`;
-            select.appendChild(option);
-        });
+        if(select) {
+            select.innerHTML = '<option value="">-- Começar do Zero (Vazio) --</option>';
+            arquivos.forEach(arq => {
+                const nomeRaw = arq.name.split('/')[1];
+                if(!nomeRaw) return;
+                const nomeLimpo = nomeRaw.replace('.tar.gz', '');
+                const option = document.createElement('option');
+                option.value = nomeLimpo;
+                option.textContent = `📂 ${nomeLimpo}`;
+                select.appendChild(option);
+            });
+            if(currentLoadedBackup) select.value = currentLoadedBackup;
+        }
 
         // 2. Preenche a Lista de Baixo (Downloads + Navegação)
         if (listaUl) {
@@ -54,6 +58,7 @@ async function carregarListaDownloads() {
 
             arquivos.forEach(arq => {
                 const nomeRaw = arq.name.split('/')[1]; 
+                if(!nomeRaw) return;
                 const nomeLimpo = nomeRaw.replace('.tar.gz', '');
                 const tamanho = (arq.size / 1024 / 1024).toFixed(2);
                 const linkDownloadBackup = `/api/download?userId=${currentUserId}&nomeArquivo=${nomeRaw}`;
@@ -66,7 +71,7 @@ async function carregarListaDownloads() {
                         <span style="font-weight:bold; color:#f1f1f1;">📦 ${nomeLimpo} <small style="color:#aaa; font-weight:normal;">(${tamanho} MB)</small></span>
                         
                         <div>
-                            <button onclick="toggleNavegacao('${nomeLimpo}', this)" style="background:#17a2b8; color:white; border:none; padding:6px 12px; cursor:pointer; border-radius:4px; font-size: 0.8em; margin-right: 5px;">
+                            <button onclick="toggleNavegacao('${nomeRaw}', this)" style="background:#17a2b8; color:white; border:none; padding:6px 12px; cursor:pointer; border-radius:4px; font-size: 0.8em; margin-right: 5px;">
                                 📂 Navegar
                             </button>
 
@@ -95,57 +100,46 @@ async function carregarListaDownloads() {
 }
 
 // --- 2. LÓGICA DA ÁRVORE (Tree View) ---
-
-// Abre/Fecha a navegação
-window.toggleNavegacao = async (nomeBackup, btn) => {
-    const container = document.getElementById(`tree-container-${nomeBackup}`);
+window.toggleNavegacao = async (nomeRawBackup, btn) => {
+    const nomeLimpo = nomeRawBackup.replace('.tar.gz', '');
+    const container = document.getElementById(`tree-container-${nomeLimpo}`);
     
-    // Se já está aberto, fecha
     if (container.style.display === 'block') {
         container.style.display = 'none';
         btn.innerText = '📂 Navegar';
         return;
     }
 
-    // Abre e muda o texto do botão
     container.style.display = 'block';
     btn.innerText = '📂 Fechar';
 
-    // Se já temos os dados em cache, não chama o servidor de novo
-    if (cacheArquivos[nomeBackup]) {
-        desenharArvore(container, cacheArquivos[nomeBackup], nomeBackup);
+    if (cacheArquivos[nomeRawBackup]) {
+        desenharArvore(container, cacheArquivos[nomeRawBackup], nomeRawBackup);
         return;
     }
 
-    // Busca estrutura no servidor
     try {
-        const res = await fetch(`/api/backups/content?userId=${currentUserId}&nomeArquivo=${nomeBackup}`);
+        const res = await fetch(`/api/backups/content?userId=${currentUserId}&nomeArquivo=${nomeRawBackup}`);
         const files = await res.json();
         
-        cacheArquivos[nomeBackup] = files; // Salva no cache
-        desenharArvore(container, files, nomeBackup);
+        cacheArquivos[nomeRawBackup] = files;
+        desenharArvore(container, files, nomeRawBackup);
     } catch (e) { 
         container.innerHTML = '<span style="color:red">Erro ao carregar arquivos.</span>'; 
     }
 };
 
-// Prepara o container e chama a renderização recursiva
 function desenharArvore(container, todosArquivos, nomeBackup) {
     container.innerHTML = '';
-    
-    // Filtra nomes vazios ou inválidos
     const listaLimpa = todosArquivos.filter(f => f.name && f.name.trim() !== '');
     
     if (listaLimpa.length === 0) {
         container.innerHTML = '<small style="color:#777">Backup vazio.</small>';
         return;
     }
-
-    // Inicia a renderização a partir da raiz
     container.appendChild(renderizarNivel(listaLimpa, '', nomeBackup));
 }
 
-// Função Recursiva que desenha pastas e arquivos
 function renderizarNivel(todosArquivos, prefixoAtual, nomeBackup) {
     const ul = document.createElement('ul');
     ul.style.listStyle = 'none';
@@ -155,7 +149,6 @@ function renderizarNivel(todosArquivos, prefixoAtual, nomeBackup) {
     let pastas = new Set();
     let arquivos = [];
 
-    // Separa o que é pasta e o que é arquivo neste nível
     todosArquivos.forEach(file => {
         if (!file.name.startsWith(prefixoAtual)) return;
         
@@ -163,21 +156,17 @@ function renderizarNivel(todosArquivos, prefixoAtual, nomeBackup) {
         const partes = relativo.split('/');
 
         if (partes.length > 1 && partes[0] !== '') {
-            pastas.add(partes[0]); // É pasta
+            pastas.add(partes[0]);
         } else if (partes.length === 1 && partes[0] !== '') {
-            // É arquivo (ignora se for apenas o nome do diretório terminando em /)
             if (file.type !== 'directory' && !file.name.endsWith('/')) {
                 arquivos.push({ ...file, nomeCurto: partes[0] });
             }
         }
     });
 
-    // 1. Renderiza Pastas
     pastas.forEach(nomePasta => {
         const li = document.createElement('li');
         const novoPrefixo = prefixoAtual + nomePasta + '/';
-        
-        // Link para baixar a pasta inteira
         const linkZip = `/api/backups/download-folder?userId=${currentUserId}&nomeBackup=${nomeBackup}&folder=${encodeURIComponent(novoPrefixo)}`;
 
         li.innerHTML = `
@@ -185,31 +174,22 @@ function renderizarNivel(todosArquivos, prefixoAtual, nomeBackup) {
                 <span style="cursor:pointer; color: #f3ff4dff; flex:1;" onclick="this.parentElement.nextElementSibling.style.display = (this.parentElement.nextElementSibling.style.display === 'none' ? 'block' : 'none');">
                     ▶ 📁 ${nomePasta}
                 </span>
-                
                 <a href="${linkZip}" target="_blank" onclick="event.stopPropagation()">
                     <button style="background:none; border:2px solid #4db8ff; color:#4db8ff; cursor:pointer; padding:6px 12px; font-size:0.7em; border-radius:5px;">⬇️ .ZIP</button>
                 </a>
             </div>
         `;
-        
-        // Container dos filhos (invisível por padrão)
         const divFilhos = document.createElement('div');
         divFilhos.style.display = 'none';
-        
-        // RECURSÃO: Chama a si mesma para preencher o conteúdo
         divFilhos.appendChild(renderizarNivel(todosArquivos, novoPrefixo, nomeBackup));
-        
         li.appendChild(divFilhos);
         ul.appendChild(li);
     });
 
-    // 2. Renderiza Arquivos
     arquivos.forEach(arq => {
         const li = document.createElement('li');
         li.style.cssText = "padding:3px 0; display:flex; justify-content:space-between; border-bottom:1px dashed #444; align-items:center;";
-        
         const link = `/api/backups/download-single?userId=${currentUserId}&nomeBackup=${nomeBackup}&file=${encodeURIComponent(arq.name)}`;
-        
         li.innerHTML = `
             <span style="color:#ccc;">📄 ${arq.nomeCurto}</span>
             <a href="${link}" target="_blank">
@@ -222,7 +202,6 @@ function renderizarNivel(todosArquivos, prefixoAtual, nomeBackup) {
     return ul;
 }
 
-// Chame a função assim que o script carregar
 carregarListaDownloads();
 
 // --- Lógica de Inicialização ---
@@ -231,32 +210,57 @@ function initializeTerminal() {
     terminalContainer.style.display = 'block';
 
     term.open(document.getElementById('terminal'));
-    fitAddon.fit();
-    window.addEventListener('resize', () => fitAddon.fit());
+    setTimeout(() => {
+        fitAddon.fit();
+        socket.emit('resize', { cols: term.cols, rows: term.rows });
+    }, 100);
+    window.addEventListener('resize', () => {
+        fitAddon.fit();
+        socket.emit('resize', { cols: term.cols, rows: term.rows });
+    });
 }
 
-async function preencherDropdownBackups() {
+// --- CONTROLE DA INTERFACE DE BACKUP ---
+function atualizarInterfaceBackup() {
+    const areaAtual = document.getElementById('area-salvar-atual');
+    const lblAtual = document.getElementById('lbl-nome-atual');
+    const btnAtual = document.getElementById('btn-salvar-atual');
+
+    if (currentLoadedBackup && areaAtual) {
+        areaAtual.style.display = 'flex';
+        lblAtual.textContent = currentLoadedBackup;
+
+        btnAtual.onclick = function() {
+            window.salvarArquivo(currentLoadedBackup);
+        };
+    } else if (areaAtual) {
+        areaAtual.style.display = 'none';
+    }
+}
+
+// --- Lógica de Backup (Agora só calcula Cota e atualiza listas externas) ---
+async function carregarBackups() {
+    const status = document.getElementById('status-cota');
+
+    await carregarListaDownloads(); 
+
     try {
         const res = await fetch(`/api/backups?userId=${currentUserId}`);
         const arquivos = await res.json();
         
-        selectBackup.innerHTML = '<option value="">-- Começar do Zero (Vazio) --</option>';
-
+        let totalSize = 0;
         arquivos.forEach(arq => {
-            const nomeLimpo = arq.name.split('/')[1].replace('.tar.gz', '');
-            const option = document.createElement('option');
-            option.value = nomeLimpo; 
-            option.textContent = `📂 ${nomeLimpo} (${(arq.size/1024/1024).toFixed(2)} MB)`;
-            selectBackup.appendChild(option);
+            totalSize += arq.size;
         });
+        
+        if(status) status.innerText = `Uso: ${(totalSize/1024/1024).toFixed(2)} / 100 MB`;
+
     } catch (e) {
-        console.error("Erro ao carregar backups para o menu", e);
+        console.error("Erro cota", e);
     }
 }
 
-preencherDropdownBackups();
-
-// Lida com o envio do formulário de configuração inicial
+// --- EVENTOS ---
 setupForm.addEventListener('submit', (e) => {
     e.preventDefault(); 
     const numMachines = parseInt(numMachinesInput.value, 10);
@@ -276,15 +280,8 @@ setupForm.addEventListener('submit', (e) => {
     }
 });
 
-
-// --- Lógica de Interação com o Terminal ---
-term.onData(data => {
-    socket.emit('input', data);
-});
-
-socket.on('output', data => {
-    term.write(data);
-});
+term.onData(data => socket.emit('input', data));
+socket.on('output', data => term.write(data));
 
 socket.on('session-ready', (data) => {
     const machineList = document.getElementById('machine-list');
@@ -303,79 +300,29 @@ socket.on('session-ready', (data) => {
         const backupUi = document.getElementById('backup-ui');
         if(backupUi) {
             backupUi.style.display = 'block';
-            carregarBackups(); 
-            window.atualizarArquivosPod();
+            atualizarInterfaceBackup();
+            carregarBackups();
         }
     }
 });
 
 socket.on('connect_error', (err) => {
-    console.error(`Erro de conexão: ${err.message}`);
     term.write(`\r\n[ERRO DE CONEXÃO]: ${err.message}`);
 });
 
-// --- LÓGICA DE BACKUP INTERNO (Rodapé) ---
-
-async function carregarBackups() {
-    const lista = document.getElementById('lista-backups');
-    const status = document.getElementById('status-cota');
-    if(!lista) return;
-
-    lista.innerHTML = 'Carregando...';
-    await preencherDropdownBackups();
-
-    try {
-        const res = await fetch(`/api/backups?userId=${currentUserId}`);
-        const arquivos = await res.json();
-        
-        lista.innerHTML = '';
-        let totalSize = 0;
-
-        arquivos.forEach(arq => {
-            totalSize += arq.size;
-            const nomeParaSalvar = arq.name.split('/')[1].replace('.tar.gz', '');
-            const isAtual = (nomeParaSalvar === currentLoadedBackup);
-
-            const li = document.createElement('li');
-            li.style.display = 'flex'; 
-            li.style.justifyContent = 'space-between';
-            li.style.marginBottom = '5px';
-            li.style.padding = '8px';
-            li.style.borderRadius = '4px';
-            
-            if (isAtual) {
-                li.style.background = 'rgba(40, 167, 69, 0.2)'; 
-                li.style.border = '1px solid #28a745';
-            } else {
-                li.style.background = '#444';
-            }
-            
-            let botaoAcao = '';
-            if (isAtual) {
-                 botaoAcao = `<button onclick="salvarArquivo('${nomeParaSalvar}')" style="background:#28a745; color:white; border:none; cursor:pointer; padding: 2px 8px; margin-right:5px;">💾 Salvar</button>`;
-            }
-
-            li.innerHTML = `
-                <span style="${isAtual ? 'font-weight:bold' : ''}">${nomeParaSalvar} <small>(${(arq.size/1024/1024).toFixed(2)} MB)</small></span>
-                <div>
-                    ${botaoAcao}
-                    <button onclick="deletar('${arq.name}')" style="background:#dc3545; color:white; border:none; cursor:pointer; padding: 2px 8px;">X</button>
-                </div>
-            `;
-            lista.appendChild(li);
-        });
-        
-        if(status) status.innerText = `Uso: ${(totalSize/1024/1024).toFixed(2)} / 100 MB`;
-    } catch (e) {
-        console.error("Erro listando backups", e);
-        lista.innerHTML = 'Erro ao carregar lista.';
-    }
-}
-
-// --- FUNÇÃO DE SALVAR GLOBAL ---
+// --- SALVAR ---
 window.salvarArquivo = async function(nomeAlvo) {
     if(!myMasterPodName) return alert('Erro: Pod não conectado.');
     
+    nomeAlvo = nomeAlvo.trim();
+    if(!nomeAlvo) return alert("Nome inválido");
+
+    const jaExiste = Array.from(selectBackup.options).some(o => o.value === nomeAlvo);
+
+    if (jaExiste && nomeAlvo !== currentLoadedBackup) {
+        if(!confirm(`O arquivo "${nomeAlvo}" JÁ EXISTE! \n\nDeseja sobreescrever?`)) return;
+    }
+
     try {
         const res = await fetch('/api/backups', {
             method: 'POST',
@@ -393,13 +340,13 @@ window.salvarArquivo = async function(nomeAlvo) {
         else {
             alert('Salvo com sucesso!');
             currentLoadedBackup = nomeAlvo;
+            atualizarInterfaceBackup(); 
             socket.emit('update-active-backup', nomeAlvo);
 
-            // Atualiza listas e limpa cache da navegação pois o arquivo mudou
-            delete cacheArquivos[nomeAlvo];
-            carregarBackups();
-            carregarListaDownloads();
-            window.atualizarArquivosPod();
+            const nomeRaw = nomeAlvo + ".tar.gz";
+            if(cacheArquivos[nomeRaw]) delete cacheArquivos[nomeRaw];
+            
+            await carregarBackups();
             
             const inputNovo = document.getElementById('nome-backup');
             if(inputNovo) inputNovo.value = '';
@@ -409,89 +356,16 @@ window.salvarArquivo = async function(nomeAlvo) {
     }
 };
 
-// --- CONFIGURAÇÃO DO BOTÃO "SALVAR NOVO" ---
 const btnSalvarNovo = document.getElementById('btn-salvar-novo');
-
 if(btnSalvarNovo) {
     btnSalvarNovo.addEventListener('click', () => {
         let nome = document.getElementById('nome-backup').value;
         if(!nome) return alert("Digite um nome para o novo arquivo.");
-        nome = nome.trim(); 
-
-        const jaExiste = Array.from(selectBackup.options).some(o => o.value === nome);
-
-        if (jaExiste) {
-            const confirmar = confirm(`O arquivo "${nome}" JÁ EXISTE!\n\nSe você continuar, o conteúdo antigo será APAGADO e substituído pelo atual.\n\nDeseja SOBRESCREVER?`);
-            if (!confirmar) return; 
-        }
         window.salvarArquivo(nome);
     });
 }
 
-// --- FUNÇÃO RESTAURAR ---
-window.restaurar = async (nome) => {
-    if(!confirm(`Carregar conteúdo de "${nome}"? Isso mistura com os arquivos atuais.`)) return;
-    
-    try {
-        const res = await fetch('/api/backups/restore', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: currentUserId, podName: myMasterPodName, nomeArquivo: nome })
-        });
-        const json = await res.json();
-        if(json.error) alert(json.error);
-        else {
-            alert("Conteúdo adicionado!");
-            socket.emit('input', 'ls -la\r'); 
-        }
-    } catch(e) { alert("Erro ao restaurar."); }
-};
-
-// 1. Pede a lista para o servidor
-window.atualizarArquivosPod = function() {
-    if(!myMasterPodName) return;
-    socket.emit('list-pod-files', { podName: myMasterPodName });
-};
-
-// 2. Recebe a lista e desenha na tela
-socket.on('pod-files-list', (files) => {
-    const lista = document.getElementById('pod-file-list');
-    if(!lista) return; // Proteção caso o elemento não exista ainda
-    lista.innerHTML = '';
-
-    if (files.length === 0) {
-        lista.innerHTML = '<li style="color:#777; padding:5px;">Pasta vazia.</li>';
-        return;
-    }
-
-    files.forEach(file => {
-        const isDir = file.endsWith('/'); 
-        const nome = file;
-        
-        const li = document.createElement('li');
-        li.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid #333;";
-        
-        if (isDir) {
-            li.innerHTML = `<span style="color: #4db8ff;">📁 ${nome}</span>`;
-        } else {
-            li.innerHTML = `
-                <span style="color: #eee;">📄 ${nome}</span>
-                <a href="/api/pod/download-file?podName=${myMasterPodName}&fileName=${nome}" target="_blank">
-                    <button style="background:#333; color:white; border:1px solid #555; cursor:pointer; border-radius:3px; padding: 2px 6px; font-size: 0.8em;">⬇️</button>
-                </a>
-            `;
-        }
-        lista.appendChild(li);
-    });
-});
-
-// 3. Função para Baixar TUDO (Zipado)
-window.baixarTudoPod = function() {
-    if(!myMasterPodName) return alert("Terminal não conectado.");
-    window.open(`/api/pod/download-file?podName=${myMasterPodName}`, '_blank');
-};
-
-// Função global para deletar
+// --- DELETAR ---
 window.deletar = async (nome) => {
     if(!confirm('Tem certeza que deseja APAGAR este arquivo permanentemente?')) return;
     
@@ -503,16 +377,14 @@ window.deletar = async (nome) => {
         });
         
         const nomeLimpo = nome.split('/')[1].replace('.tar.gz', '');
-        
-        // Limpa cache e estado
-        delete cacheArquivos[nomeLimpo];
+        delete cacheArquivos[nome];
+
         if(nomeLimpo === currentLoadedBackup) {
             currentLoadedBackup = null;
+            atualizarInterfaceBackup();
         }
 
-        await carregarListaDownloads(); 
         await carregarBackups();
-
         alert('Arquivo apagado.');
 
     } catch (e) {
