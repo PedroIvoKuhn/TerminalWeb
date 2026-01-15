@@ -8,7 +8,10 @@ const numMachinesInput = document.getElementById('num-machines');
 
 let myMasterPodName = null;
 let currentLoadedBackup = null;
-const currentUserId = 'devUser';
+let currentUserId = 'devUser'; // Valor padrão para testes locais
+const metaTagUser = document.querySelector('meta[name="user-id"]');
+if (metaTagUser && metaTagUser.content && metaTagUser.content !== '{{USER_ID}}')
+    currentUserId = metaTagUser.content;
 const selectBackup = document.getElementById('select-backup');
 
 let cacheArquivos = {}; 
