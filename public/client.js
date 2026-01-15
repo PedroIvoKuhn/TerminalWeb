@@ -8,10 +8,6 @@ const numMachinesInput = document.getElementById('num-machines');
 
 let myMasterPodName = null;
 let currentLoadedBackup = null;
-let currentUserId = 'devUser'; // Valor padrão para testes locais
-const metaTagUser = document.querySelector('meta[name="user-id"]');
-if (metaTagUser && metaTagUser.content && metaTagUser.content !== '{{USER_ID}}')
-    currentUserId = metaTagUser.content;
 const selectBackup = document.getElementById('select-backup');
 
 let cacheArquivos = {}; 
@@ -32,7 +28,8 @@ async function carregarListaDownloads() {
     const select = document.getElementById('select-backup');
     
     try {
-        const res = await fetch(`/api/backups?userId=${currentUserId}`);
+        const res = await fetch('/api/backups');
+        if (!res.ok) throw new Error("Erro ao buscar lista");
         const arquivos = await res.json();
 
         // 1. Preenche o Dropdown (Select)
@@ -64,7 +61,7 @@ async function carregarListaDownloads() {
                 if(!nomeRaw) return;
                 const nomeLimpo = nomeRaw.replace('.tar.gz', '');
                 const tamanho = (arq.size / 1024 / 1024).toFixed(2);
-                const linkDownloadBackup = `/api/download?userId=${currentUserId}&nomeArquivo=${nomeRaw}`;
+                const linkDownloadBackup = `/api/download?nomeArquivo=${encodeURIComponent(nomeRaw)}`;
 
                 const li = document.createElement('li');
                 li.style.cssText = "background: #333; margin-bottom: 5px; padding: 10px; border-radius: 4px; border: 1px solid #444;";
@@ -122,7 +119,8 @@ window.toggleNavegacao = async (nomeRawBackup, btn) => {
     }
 
     try {
-        const res = await fetch(`/api/backups/content?userId=${currentUserId}&nomeArquivo=${nomeRawBackup}`);
+        const res = await fetch(`/api/backups/content?nomeArquivo=${encodeURIComponent(nomeRawBackup)}`);
+        if (!res.ok) throw new Error("Erro ao carregar");
         const files = await res.json();
         
         cacheArquivos[nomeRawBackup] = files;
@@ -170,7 +168,7 @@ function renderizarNivel(todosArquivos, prefixoAtual, nomeBackup) {
     pastas.forEach(nomePasta => {
         const li = document.createElement('li');
         const novoPrefixo = prefixoAtual + nomePasta + '/';
-        const linkZip = `/api/backups/download-folder?userId=${currentUserId}&nomeBackup=${nomeBackup}&folder=${encodeURIComponent(novoPrefixo)}`;
+        const linkZip = `/api/backups/download-folder?nomeBackup=${nomeBackup}&folder=${encodeURIComponent(novoPrefixo)}`;
 
         li.innerHTML = `
             <div style="padding:3px 0; display:flex; justify-content:space-between; align-items:center;">
@@ -192,7 +190,7 @@ function renderizarNivel(todosArquivos, prefixoAtual, nomeBackup) {
     arquivos.forEach(arq => {
         const li = document.createElement('li');
         li.style.cssText = "padding:3px 0; display:flex; justify-content:space-between; border-bottom:1px dashed #444; align-items:center;";
-        const link = `/api/backups/download-single?userId=${currentUserId}&nomeBackup=${nomeBackup}&file=${encodeURIComponent(arq.name)}`;
+        const link = `/api/backups/download-single?nomeBackup=${nomeBackup}&file=${encodeURIComponent(arq.name)}`;
         li.innerHTML = `
             <span style="color:#ccc;">📄 ${arq.nomeCurto}</span>
             <a href="${link}" target="_blank">
@@ -248,7 +246,11 @@ async function carregarBackups() {
     await carregarListaDownloads(); 
 
     try {
-        const res = await fetch(`/api/backups?userId=${currentUserId}`);
+        const res = await fetch('/api/backups');
+        if (res.status === 401) {
+            console.warn("Sessão não autorizada");
+            return;
+        }
         const arquivos = await res.json();
         
         let totalSize = 0;
@@ -276,7 +278,6 @@ setupForm.addEventListener('submit', (e) => {
         socket.emit('start-session', { 
             numMachines, 
             mpiImage, 
-            userId: currentUserId, 
             backupName: backupName 
         });
         initializeTerminal();
@@ -331,7 +332,6 @@ window.salvarArquivo = async function(nomeAlvo) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-                userId: currentUserId, 
                 podName: myMasterPodName, 
                 nomeArquivo: nomeAlvo 
             })
@@ -376,11 +376,11 @@ window.deletar = async (nome) => {
         await fetch('/api/backups', {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: currentUserId, nomeCompleto: nome })
+            body: JSON.stringify({ nomeCompleto: nome })
         });
         
         const nomeLimpo = nome.split('/')[1].replace('.tar.gz', '');
-        delete cacheArquivos[nome];
+        if (cacheArquivos[nome]) delete cacheArquivos[nome];
 
         if(nomeLimpo === currentLoadedBackup) {
             currentLoadedBackup = null;

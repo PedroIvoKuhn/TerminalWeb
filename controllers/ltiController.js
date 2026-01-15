@@ -64,12 +64,16 @@ async function setup(app) {
     });
 
     lti.onConnect(async (token, req, res) => {
-        console.log('Usuário conectado:', token.user);
-        const userName = token.user.name || 'Usuário Desconhecido';
+        console.log('Usuário conectado:', token.userInfo.name , " ID:", token.user);
+        const userName = token.userInfo.name || 'Usuário Desconhecido';
         let mpiImage = process.env.DEFAULT_MPI_IMAGE;
- 
+
+        //ID para o MiniO
+        req.session.userId = token.user;
+        req.session.save();
+
         const custImagem = token.platformContext.custom ? token.platformContext.custom.imagem : undefined;
-        if (custImagem && custImagem.toLowerCase() !== 'default') {              
+        if (custImagem && custImagem.toLowerCase() !== 'default') {
             mpiImage = custImagem;
         }
         renderTemplate(res, userName, mpiImage);

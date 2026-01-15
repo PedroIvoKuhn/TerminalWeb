@@ -1,4 +1,3 @@
-// services/minioService.js
 const Minio = require('minio');
 const { k8sExec, namespace } = require('../config/kubernetes');
 const stream = require('stream');
@@ -7,8 +6,6 @@ const zlib = require('zlib');
 
 // Configuração do MinIO (pegando do .env)
 const minioClient = new Minio.Client({
-    // Em produção (Cluster), isso será algo como 'minio-service.default.svc.cluster.local'
-    // Em teste local, pode ser o IP da máquina master (ex: '192.168.1.50')
     endPoint: process.env.MINIO_ENDPOINT || 'minio-service', 
     port: parseInt(process.env.MINIO_PORT) || 9000, 
     useSSL: false, 

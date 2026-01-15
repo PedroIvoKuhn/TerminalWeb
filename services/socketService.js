@@ -5,14 +5,30 @@ const minioService = require('./minioService');
 
 module.exports = (io) => {
     io.on('connection', (socket) => {
+        const session = socket.request.session;
+        let userId = session ? session.userId : null;
+
+        if (!userId && process.env.NODE_ENV === 'development') {
+            userId = 'devUser';
+        }
+
+        console.log(`[Socket] Conectado. UserID da Sessão: ${userId}`);
+        socket.data.userId = userId;
         socket.data.activeBackupName = null;
-        socket.data.userId = null;
-        socket.on('start-session', async ({numMachines, mpiImage, userId, backupName}) => {
+        socket.on('start-session', async (data) => {
+            let { numMachines, mpiImage, backupName } = data;
+            const currentUserId = socket.data.userId;
+
+            if (!currentUserId) {
+                console.log("[Socket] Bloqueio: Usuário não identificado.");
+                socket.emit('output', '⛔ Erro: Sessão inválida ou expirada. Recarregue a página no Moodle.\r\n');
+                return;
+            }
+
             const jobId = `mpi-job-${socket.id.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
             const secretName = `ssh-keys-${jobId}`;
             // Guardamos os dados importantes na memória do socket
             socket.data.jobId = jobId;
-            socket.data.userId = userId;
             // Se ele começou com um arquivo, esse é o ativo. Se começou do zero, é null.
             socket.data.activeBackupName = backupName || null;
 
