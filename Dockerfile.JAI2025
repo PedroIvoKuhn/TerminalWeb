@@ -52,10 +52,10 @@ ENV GOCACHE=/go-cache/build
 ENV GOMODCACHE=/go-cache/mod
 
 # 4. Configuração do Usuário
-RUN groupadd -g 1000 mpiuser && \
-    useradd -u 1000 -g 1000 -m -s /bin/bash mpiuser && \
-    usermod -aG sudo mpiuser && \
-    echo "mpiuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+RUN groupadd -g 1000 aluno && \
+    useradd -u 1000 -g 1000 -m -s /bin/bash aluno && \
+    usermod -aG sudo aluno && \
+    echo "aluno ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # 5. Configuração do SSH
 RUN sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config && \
@@ -63,16 +63,16 @@ RUN sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd
     sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
 
 # Prepara pasta .ssh
-RUN mkdir -p /home/mpiuser/.ssh && \
-    chmod 700 /home/mpiuser/.ssh && \
-    chown -R mpiuser:mpiuser /home/mpiuser/.ssh
+RUN mkdir -p /home/aluno/.ssh && \
+    chmod 700 /home/aluno/.ssh && \
+    chown -R aluno:aluno /home/aluno/.ssh
 
 # Diretório necessário para o daemon do SSH
 RUN mkdir -p /var/run/sshd && chmod 0755 /var/run/sshd
 
 # 6. Define usuário e diretório de trabalho
-USER mpiuser
-WORKDIR /home/mpiuser
+USER aluno
+WORKDIR /home/aluno
 
 # Cache Go?
 RUN go install -v std
