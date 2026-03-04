@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web Terminal MPI</title>
-    <meta name="mpi-image" content="{{MPI_IMAGE}}">
+    <title>Web Terminal</title>
+    <meta name="image" content="{{IMAGE}}">
     <link rel="stylesheet" href="/xterm/css/xterm.css" />
     <link rel="stylesheet" href="/css/index.css" />
 </head>
@@ -13,9 +13,9 @@
 
     <div id="setup-container">
         <h2>Configuração do Cluster</h2>
-        <p>Você está usando a imagem: {{MPI_IMAGE}}</p>
+        <p>Você está usando a imagem: {{IMAGE}}</p>
         <p>Cada sessão tem um tempo máximo de 2 horas</p>
-        <p>Quantos nós (máquinas) você deseja para sua aplicação MPI?</p>
+        <p>Quantos nós (máquinas) você deseja para sua aplicação?</p>
         <form id="setup-form">
             <input type="number" id="num-machines" value="2" min="1" required>
             <button type="submit">Iniciar Terminal</button>
