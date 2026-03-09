@@ -87,7 +87,7 @@ module.exports = (io) => {
             socket.emit('output', `\r\n Restaurando sessão...\r\n`);
             
             try {
-                const oldSession = sessionService.restoreSession(jobId);
+                const oldSession = sessionService.restoreSession(jobId, socket);
                 if(!oldSession){
                     socket.emit('session:expired', "Sua sessão expirou");
                     return;
