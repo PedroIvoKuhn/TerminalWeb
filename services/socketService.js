@@ -59,12 +59,11 @@ module.exports = (io) => {
                 execWs.onmessage = (event) => { 
                     socket.emit('output', event.data.toString().substring(1)); 
                 };
-/*
+
                 execWs.onclose = async () => { 
-                    socket.emit('output', '\r\n[Sessão no Pod encerrada]');
-                    await k8sService.cleanupJob(jobId, secretName); 
+                    socket.emit('output', '\r\n[Sessão do terminal encerrada pelo usuário. O cluster continuará rodando até o tempo expirar.]\r\n');
+                    socket.emit('output', 'Dê um F5 (Atualizar a página) para abrir um novo terminal neste mesmo cluster.\r\n'); 
                 };
-// */
             } catch (err) {
                 console.error('Erro no ciclo de vida do Pod:', err);
                 socket.emit('output', `\r\n[ERRO DO BACKEND]: ${err.message}\r\nIniciando limpeza...`);
@@ -124,12 +123,11 @@ module.exports = (io) => {
                 execWs.onmessage = (event) => { 
                     socket.emit('output', event.data.toString().substring(1)); 
                 };
-/*
+
                 execWs.onclose = async () => { 
-                    socket.emit('output', '\r\n[Sessão no Pod encerrada]');
-                    await k8sService.cleanupJob(jobId, secretName); 
+                    socket.emit('output', '\r\n[Sessão do terminal encerrada pelo usuário. O cluster continuará rodando até o tempo expirar.]\r\n');
+                    socket.emit('output', 'Dê um F5 (Atualizar a página) para abrir um novo terminal neste mesmo cluster.\r\n');
                 };
-// */
             } catch (err) {
                 console.error('Erro no ciclo de vida do Pod:', err);
                 socket.emit('output', `\r\n[ERRO DO BACKEND]: ${err.message}\r\nIniciando limpeza...`);
