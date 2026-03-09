@@ -50,6 +50,7 @@ socket.on('output', data => {
 socket.on('session-ready', (data) => {
     const machineList = document.getElementById('machine-list');
     machineList.innerHTML = '';
+    localStorage.setItem("jobId", data.jobId);
 
     data.aliases.forEach(alias => {
         const listItem = document.createElement('li');
@@ -126,6 +127,7 @@ socket.on('session:warning', () => {
 socket.on('session:expired', (msg) => {
     clearInterval(countdownInterval);
     timerBar.style.display = 'none';
+    localStorage.removeItem("jobId");
     alert(msg);
     window.location.reload();
 });
@@ -142,3 +144,10 @@ document.getElementById('btn-extend').addEventListener('click', () => {
 document.getElementById('btn-ignore').addEventListener('click', () => {
     sessionModal.style.display = 'none'; // Só fecha a janela, o tempo continua correndo para o fim
 });
+
+// --- Restaurar Sessão ---
+const jobId = localStorage.getItem("jobId");
+if(jobId) {
+    initializeTerminal();
+    socket.emit("restore-session", { jobId });
+}

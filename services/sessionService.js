@@ -11,7 +11,7 @@ const EXTENSION_TIME = 1 * 60 * 60 * 1000;    // +1 Hora
 // Armazena os timers ativos: { jobId: { killTimer, warnTimer, expiresAt } }
 const activeSessions = {};
 
-function startSession(jobId, socket) {
+function startSession(jobId, socket, numMachines) {
     const now = Date.now();
     const expiresAt = now + INITIAL_DURATION;
     
@@ -20,6 +20,7 @@ function startSession(jobId, socket) {
     // Salva os dados da sessão
     activeSessions[jobId] = {
         socket: socket,
+        numMachines: numMachines,
         expiresAt: expiresAt,
         // 1. Timer do Aviso
         warnTimer: setTimeout(() => {
@@ -79,6 +80,14 @@ function extendSession(jobId) {
     return newExpiration;
 }
 
+function restoreSession(jobId) {
+    const session = activeSessions[jobId];
+    if(!session) return false;
+    
+    const { expiresAt, numMachines } = session;
+    return { expiresAt, numMachines };
+}
+
 async function terminateSession(jobId) {
     const session = activeSessions[jobId];
     if (session) {
@@ -106,4 +115,4 @@ function clearSession(jobId) {
     }
 }
 
-module.exports = { startSession, extendSession, clearSession };
+module.exports = { startSession, extendSession, restoreSession, clearSession };

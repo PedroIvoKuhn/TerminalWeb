@@ -10,7 +10,7 @@ module.exports = (io) => {
             const secretName = `ssh-keys-${jobId}`;
             socket.data.jobId = jobId;
 
-            socket.emit('output', `\r\nIniciando ${numMachines} nós para o job ${jobId} usando a imagem ${image}...\r\n`);
+            socket.emit('output', `\r\nIniciando ${numMachines} nós usando a imagem ${image}...\r\n`);
             
             try {
                 // Gerar Chaves
@@ -19,12 +19,12 @@ module.exports = (io) => {
 
                 // Criar a infraestrutura
                 const { masterPodName } = await k8sService.createClusterResources(jobId, numMachines, image, keys);
-                socket.emit('output', `Pods criados. Aguardando o nó mestre (${masterPodName}) ficar pronto...\r\n`);
+                socket.emit('output', `Pods criados. Aguardando o nó mestre ficar pronto...\r\n`);
 
                 // Esperar ficar pronto
                 await k8sService.waitForPodRunning(masterPodName);
 
-                const expiresAt = sessionService.startSession(jobId, socket);
+                const expiresAt = sessionService.startSession(jobId, socket, numMachines);
                 socket.emit('session:update', { expiresAt: expiresAt });
 
                 const machineAliases = ['master'];
@@ -32,7 +32,9 @@ module.exports = (io) => {
                     machineAliases.push(`worker-${i}`);
                 }
 
-                socket.emit('session-ready', { aliases: machineAliases });
+                socket.emit('session-ready', { 
+                    aliases: machineAliases,
+                    jobId: jobId });
 
                 socket.emit('output', `\r\n✅ Conectado! Apelidos SSH configurados.\r\n`);
                 socket.emit('output', `Tente: ssh worker-1 \r\n\r\n`);
@@ -57,12 +59,12 @@ module.exports = (io) => {
                 execWs.onmessage = (event) => { 
                     socket.emit('output', event.data.toString().substring(1)); 
                 };
-
+/*
                 execWs.onclose = async () => { 
                     socket.emit('output', '\r\n[Sessão no Pod encerrada]');
                     await k8sService.cleanupJob(jobId, secretName); 
                 };
-
+// */
             } catch (err) {
                 console.error('Erro no ciclo de vida do Pod:', err);
                 socket.emit('output', `\r\n[ERRO DO BACKEND]: ${err.message}\r\nIniciando limpeza...`);
@@ -77,11 +79,61 @@ module.exports = (io) => {
                 }
         });
 
-        socket.on('disconnect', async () => {
-            sessionService.clearSession(socket.data.jobId);
-            if (socket.data.jobId) {
-                const secretName = `ssh-keys-${socket.data.jobId}`;
-                await k8sService.cleanupJob(socket.data.jobId, secretName);
+        socket.on('restore-session', async ({ jobId }) => {
+            const secretName = `ssh-keys-${jobId}`;
+            const masterPodName = `master-${jobId}`;
+            socket.data.jobId = jobId;
+
+            socket.emit('output', `\r\n Restaurando sessão...\r\n`);
+            
+            try {
+                const oldSession = sessionService.restoreSession(jobId);
+                if(!oldSession){
+                    socket.emit('session:expired', "Sua sessão expirou");
+                    return;
+                }
+                const { expiresAt, numMachines } = oldSession;
+                socket.emit('session:update', { expiresAt: expiresAt });
+
+                const machineAliases = ['master'];
+                for (let i = 1; i < numMachines; i++) {
+                    machineAliases.push(`worker-${i}`);
+                }
+
+                socket.emit('session-ready', { 
+                    aliases: machineAliases,
+                    jobId: jobId });
+
+                const command = ['/bin/bash'];
+                const execWs = await k8sExec.exec(
+                    namespace, 
+                    masterPodName, 
+                    'container', 
+                    command, 
+                    process.stdout, 
+                    process.stderr, 
+                    process.stdin, 
+                    true);
+
+                socket.on('input', (data) => { 
+                    if (execWs && execWs.readyState === 1) { 
+                        execWs.send(Buffer.from('\x00' + data)); 
+                    } 
+                });
+
+                execWs.onmessage = (event) => { 
+                    socket.emit('output', event.data.toString().substring(1)); 
+                };
+/*
+                execWs.onclose = async () => { 
+                    socket.emit('output', '\r\n[Sessão no Pod encerrada]');
+                    await k8sService.cleanupJob(jobId, secretName); 
+                };
+// */
+            } catch (err) {
+                console.error('Erro no ciclo de vida do Pod:', err);
+                socket.emit('output', `\r\n[ERRO DO BACKEND]: ${err.message}\r\nIniciando limpeza...`);
+                await k8sService.cleanupJob(jobId, secretName);
             }
         });
     });
