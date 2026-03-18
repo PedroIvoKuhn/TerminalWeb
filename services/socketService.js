@@ -82,9 +82,7 @@ module.exports = (io) => {
             const secretName = `ssh-keys-${jobId}`;
             const masterPodName = `master-${jobId}`;
             socket.data.jobId = jobId;
-
-            socket.emit('output', `\r\n Restaurando sessão...\r\n`);
-            
+           
             try {
                 const oldSession = sessionService.restoreSession(jobId, socket);
                 if(!oldSession){

@@ -128,7 +128,10 @@ socket.on('session:expired', (msg) => {
     clearInterval(countdownInterval);
     timerBar.style.display = 'none';
     localStorage.removeItem("jobId");
-    alert(msg);
+    document.getElementById('expired-modal').style.display = 'flex';
+});
+
+document.getElementById('btn-reload').addEventListener('click', () => {
     window.location.reload();
 });
 
