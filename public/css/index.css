@@ -5,6 +5,75 @@ body {
     font-family: sans-serif;
 }
 
+h1 {
+    margin-top: 60px;
+}
+
+nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 60px;
+    background-color: #333;
+    color: white;
+    display: flex; 
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 30px;
+    box-sizing: border-box;
+    font-size: 1.1rem;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
+    z-index: 999;
+}
+
+.nav-links {
+    margin: 0;
+    padding: 0;
+    display: flex; 
+    gap: 20px;
+}
+
+.nav-links li {
+    list-style: none;
+}
+
+.nav-links a {
+    text-decoration: none;
+    color: white;
+    font-weight: bold;
+    transition: color 0.3s;
+}
+
+.nav-links a:hover {
+    color: #3498db;
+}
+
+#timer-bar {
+    display: none; 
+    align-items: center;
+    gap: 15px;
+    font-weight: bold;
+    padding: 4px;
+    border-radius: 8px;
+}
+
+/* Estilo do botão de matar a sessão */
+.btn-danger {
+    background-color: #c0392b;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.btn-danger:hover {
+    background-color: #e74c3c;
+}
+
 #terminal-container {
     display: none;
 }
@@ -44,26 +113,6 @@ button {
     border-radius: 4px;
 }
 
-#timer-bar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 40px;
-    background-color: #333;
-    color: #fff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: bold;
-    font-family: monospace;
-    font-size: 1.2rem;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
-    z-index: 999;
-    display: none;
-    /* Escondido até a sessão começar */
-}
-
 /* Ajuste para o terminal não ficar embaixo da barra */
 #terminal-container {
     margin-top: 50px;
@@ -73,6 +122,8 @@ button {
 .timer-critical {
     background-color: #c0392b !important;
     animation: pulse 1s infinite;
+    padding: 4px 12px;
+    border-radius: 4px;
 }
 
 @keyframes pulse {
@@ -81,7 +132,7 @@ button {
     }
 
     50% {
-        opacity: 0.8;
+        opacity: 0.7;
     }
 
     100% {
@@ -112,7 +163,8 @@ button {
     color: white;
 }
 
-.session-content:first-child {
+.session-content h2,
+.expired-content h2 {
     color: #f39c12;
 }
 

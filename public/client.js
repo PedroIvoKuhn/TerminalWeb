@@ -38,7 +38,7 @@ setupForm.addEventListener('submit', (e) => {
     }
 });
 
-// --- Lógica de Interação com o Terminal (Pós-inicialização) ---
+// --- Lógica de Interação com o Terminal ---
 term.onData(data => {
     socket.emit('input', data);
 });
@@ -92,13 +92,14 @@ function startCountdown(expiresAt) {
 
         // Atualiza o texto
         countdownDisplay.textContent = formatTime(timeLeft);
+        const timer = document.getElementById('timer');
 
         // Se faltar menos de 20 minutos (ou o tempo do aviso), deixa vermelho
         // Ex: 20 minutos = 1200000 ms
         if (timeLeft < 1200000) { 
-            timerBar.classList.add('timer-critical');
+            timer.classList.add('timer-critical');
         } else {
-            timerBar.classList.remove('timer-critical');
+            timer.classList.remove('timer-critical');
         }
 
         // Se o tempo acabar
@@ -109,48 +110,55 @@ function startCountdown(expiresAt) {
     }, 1000);
 }
 
-// --- EVENTOS DO SOCKET ---
+// --- EVENTOS SOCKET ---
 
-// 1. Recebe a data de expiração (no início ou na extensão)
 socket.on('session:update', (data) => {
     startCountdown(data.expiresAt);
-    // Esconde o modal se ele estiver aberto (no caso de extensão)
-    sessionModal.style.display = 'none';
+    setTimeout(() => {
+        sessionModal.style.display = 'none';
+
+        document.querySelector('#session-modal h2').textContent = "⚠️ A sessão vai expirar!";
+        document.getElementById('btn-extend').disabled = false;
+        document.getElementById('btn-ignore').disabled = false;
+    }, 1500);
 });
 
-// 2. Recebe o aviso do servidor (para abrir o modal)
 socket.on('session:warning', () => {
-    sessionModal.style.display = 'flex'; // Abre o modal perguntando
+    sessionModal.style.display = 'flex';
 });
 
-// 3. Se a sessão morrer
-socket.on('session:expired', (msg) => {
+socket.on('session:expired', () => {
     clearInterval(countdownInterval);
     timerBar.style.display = 'none';
     localStorage.removeItem("jobId");
     document.getElementById('expired-modal').style.display = 'flex';
 });
 
+// --- BOTÕES DOS MODAIS ---
+
+document.getElementById('btn-extend').addEventListener('click', (e) => {
+    e.target.disabled = true;
+    document.getElementById('btn-ignore').disabled = true;
+
+    document.querySelector('#session-modal h2').textContent = "Estendendo...";
+    socket.emit('session:extend-response'); 
+});
+
+document.getElementById('btn-ignore').addEventListener('click', () => {
+    sessionModal.style.display = 'none';
+});
+
 document.getElementById('btn-reload').addEventListener('click', () => {
     window.location.reload();
 });
 
-// --- BOTÕES DO MODAL ---
-
-document.getElementById('btn-extend').addEventListener('click', () => {
-    socket.emit('session:extend-response'); // Pede mais tempo
-    // O modal só vai fechar quando o servidor responder com 'session:update'
-    // Para dar feedback visual imediato:
-    document.querySelector('#session-modal h2').textContent = "Estendendo...";
-});
-
-document.getElementById('btn-ignore').addEventListener('click', () => {
-    sessionModal.style.display = 'none'; // Só fecha a janela, o tempo continua correndo para o fim
-});
-
-// --- Restaurar Sessão ---
+// --- EVENTOS DA SESSÃO ---
 const jobId = localStorage.getItem("jobId");
 if(jobId) {
     initializeTerminal();
     socket.emit("restore-session", { jobId });
 }
+
+document.getElementById('btn-kill-session').addEventListener('click', () => {
+    socket.emit("kill-session");
+});

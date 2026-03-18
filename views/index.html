@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 
 <head>
     <meta charset="UTF-8">
@@ -11,8 +11,22 @@
 </head>
 
 <body>
-    <h1>Cluster via Web Terminal - Bem-vindo, {{NOME_USUARIO}}!</h1>
+    <nav> 
+        <ul class="nav-links">
+            <li><a href="/">Home</a></li>
+            <li><a href="/documentation">Como usar</a></li>
+        </ul>
+        <div id="timer-bar">
+            <div id="timer">
+                <span>Tempo Restante:&nbsp;</span>
+                <span id="countdown-display">--:--:--</span>
+            </div>
+                <button id="btn-kill-session" class="btn-danger">Encerrar Sessão</button>
+        </div>
+    </nav>
 
+    <h1>Cluster via Web Terminal - Bem-vindo, {{NOME_USUARIO}}!</h1>
+    
     <div id="setup-container">
         <h2>Configuração do Cluster</h2>
         <p>Você está usando a imagem: {{IMAGE}}</p>
@@ -32,10 +46,6 @@
         </div>
         <hr>
         <div id="terminal"></div>
-    </div>
-
-    <div id="timer-bar">
-        Tempo Restante:&nbsp;<span id="countdown-display">--:--:--</span>
     </div>
 
     <div id="session-modal">

@@ -2,6 +2,7 @@ const { k8sExec, namespace } = require('../config/kubernetes');
 const k8sService = require('./k8sService');
 const sshService = require('./sshService');
 const sessionService = require('./sessionService');
+const { V1TopologySelectorTerm } = require('@kubernetes/client-node');
 
 module.exports = (io) => {
     io.on('connection', (socket) => {
@@ -39,35 +40,9 @@ module.exports = (io) => {
                 socket.emit('output', `\r\n✅ Conectado! Apelidos SSH configurados.\r\n`);
                 socket.emit('output', `Tente: ssh worker-1 \r\n\r\n`);
 
-                const command = ['/bin/bash'];
-                const execWs = await k8sExec.exec(
-                    namespace, 
-                    masterPodName, 
-                    'container', 
-                    command, 
-                    process.stdout, 
-                    process.stderr, 
-                    process.stdin, 
-                    true);
-                
-                socket.on('input', (data) => { 
-                    if (execWs && execWs.readyState === 1) { 
-                        execWs.send(Buffer.from('\x00' + data)); 
-                    } 
-                });
-
-                execWs.onmessage = (event) => { 
-                    socket.emit('output', event.data.toString().substring(1)); 
-                };
-
-                execWs.onclose = async () => { 
-                    socket.emit('output', '\r\n[Sessão do terminal encerrada pelo usuário. O cluster continuará rodando até o tempo expirar.]\r\n');
-                    socket.emit('output', 'Dê um F5 (Atualizar a página) para abrir um novo terminal neste mesmo cluster.\r\n'); 
-                };
+                await connectTerminal(socket, jobId, masterPodName);
             } catch (err) {
-                console.error('Erro no ciclo de vida do Pod:', err);
-                socket.emit('output', `\r\n[ERRO DO BACKEND]: ${err.message}\r\nIniciando limpeza...`);
-                await k8sService.cleanupJob(jobId, secretName);
+                await handlePodError(err, socket, jobId, secretName);
             }
         });
 
@@ -101,36 +76,80 @@ module.exports = (io) => {
                     aliases: machineAliases,
                     jobId: jobId });
 
-                const command = ['/bin/bash'];
-                const execWs = await k8sExec.exec(
-                    namespace, 
-                    masterPodName, 
-                    'container', 
-                    command, 
-                    process.stdout, 
-                    process.stderr, 
-                    process.stdin, 
-                    true);
-
-                socket.on('input', (data) => { 
-                    if (execWs && execWs.readyState === 1) { 
-                        execWs.send(Buffer.from('\x00' + data)); 
-                    } 
-                });
-
-                execWs.onmessage = (event) => { 
-                    socket.emit('output', event.data.toString().substring(1)); 
-                };
-
-                execWs.onclose = async () => { 
-                    socket.emit('output', '\r\n[Sessão do terminal encerrada pelo usuário. O cluster continuará rodando até o tempo expirar.]\r\n');
-                    socket.emit('output', 'Dê um F5 (Atualizar a página) para abrir um novo terminal neste mesmo cluster.\r\n');
-                };
+                await connectTerminal(socket, jobId, masterPodName);
             } catch (err) {
-                console.error('Erro no ciclo de vida do Pod:', err);
-                socket.emit('output', `\r\n[ERRO DO BACKEND]: ${err.message}\r\nIniciando limpeza...`);
-                await k8sService.cleanupJob(jobId, secretName);
+                await handlePodError(err, socket, jobId, secretName);
             }
         });
+
+        socket.on("kill-session", async () => {
+            const jobId = socket.data.jobId;
+            if (!jobId) return;
+
+            const secretName = `ssh-keys-${jobId}`;
+            sessionService.clearSession(jobId);
+            await k8sService.cleanupJob(jobId, secretName);
+            socket.emit("session:expired")
+        })
     });
 };
+
+async function connectTerminal(socket, jobId, masterPodName) {
+    const command = ['/bin/bash'];
+    const execWs = await k8sExec.exec(
+        namespace, 
+        masterPodName, 
+        'container', 
+        command, 
+        process.stdout, 
+        process.stderr, 
+        process.stdin, 
+        true);
+
+    setupTerminalInput(socket, execWs);
+    execWs.onmessage = (event) => handleTerminalOutput(event, socket, jobId);
+    execWs.onclose = () => handleTerminalClose(socket);
+
+    return execWs;
+}
+
+function handleTerminalOutput(event, socket, jobId) {
+    const buffer = Buffer.from(event.data);
+    const channel = buffer[0];
+    const message = buffer.toString('utf-8').substring(1);
+
+    if ( channel === 3 ) {
+        try {
+            const statusObj = JSON.parse(message);
+            if (statusObj.status === 'Failure' && statusObj.message && statusObj.message.includes('137')) {
+                console.log(`[k8s] Job ${jobId} encerrado com sucesso (Exit 137).`);
+            } else {
+                console.log(`[k8s STATUS ERRO - ${jobId}]:`, statusObj.message || statusObj.reason);
+            }
+        } catch ( e ) {
+            console.log(`[k8s STATUS RAW - ${jobId}]:`, message);
+        }
+        return;
+    }
+    socket.emit('output', message);
+}
+
+function handleTerminalClose(socket) {
+    socket.emit('output', '\r\n[Sessão do terminal encerrada pelo usuário. O cluster continuará rodando até o tempo expirar.]\r\n');
+}
+
+function setupTerminalInput(socket, execWs) {
+    // evita enviar uma letra duas vezes se for chamado novamente
+    socket.removeAllListeners('input');
+    socket.on('input', (data) => { 
+        if (execWs && execWs.readyState === 1) { 
+            execWs.send(Buffer.from('\x00' + data)); 
+        } 
+    });
+}
+
+async function handlePodError(err, socket, jobId, secretName) {
+    console.error('Erro no ciclo de vida do Pod:', err);
+    socket.emit('output', `\r\n[ERRO DO BACKEND]: ${err.message}\r\nIniciando limpeza...`);
+    await k8sService.cleanupJob(jobId, secretName);
+}

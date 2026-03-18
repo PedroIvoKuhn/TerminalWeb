@@ -25,6 +25,11 @@ async function setup(app) {
             const image = process.env.DEFAULT_MPI_IMAGE;
             renderTemplate(res, userName, image);
         });
+        
+        app.get('/documentation', (req, res) => {
+            const documentationPath = path.join(__dirname, '../views', 'documentation.html');
+            res.sendFile(documentationPath);
+        });
         return;
     }
 

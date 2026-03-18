@@ -76,9 +76,6 @@ function extendSession(jobId) {
     session.killTimer = setTimeout(() => {
         terminateSession(jobId);
     }, timeRemaining);
-
-    // Avisa o frontend que deu certo
-    session.socket.emit('output', `\r\n[SISTEMA] Sessão estendida por mais 1 hora. Nova expiração: ${new Date(newExpiration).toLocaleTimeString()}\r\n`);
     
     return newExpiration;
 }
@@ -97,7 +94,7 @@ async function terminateSession(jobId) {
         console.log(`[SESSION] Tempo esgotado para ${jobId}. Encerrando...`);
         
         // Avisa o usuário se ele ainda estiver conectado
-        session.socket.emit('session:expired', 'Seu tempo de sessão acabou.');
+        session.socket.emit('session:expired');
         session.socket.disconnect(true); // Força desconexão
         
         // Limpa recursos do Kubernetes
