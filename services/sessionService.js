@@ -4,12 +4,10 @@ const k8sService = require('./k8sService');
 
 const INITIAL_DURATION = 60 * 1000;             // 1 minuto
 const WARNING_BEFORE = 55 * 1000;               // 55 Segundos antes de acabar
-const EXTENSION_TIME = 60 * 1000;               // +1 Minuto
 // */
 /*
 const INITIAL_DURATION = 2 * 60 * 60 * 1000;  // 2 Horas
 const WARNING_BEFORE = 20 * 60 * 1000;        // 20 Minutos antes de acabar
-const EXTENSION_TIME = 1 * 60 * 60 * 1000;    // +1 Hora
 // */
 // Armazena os timers ativos: { jobId: { killTimer, warnTimer, expiresAt } }
 const activeSessions = {};
@@ -48,7 +46,7 @@ function sendWarning(jobId) {
     }
 }
 
-function extendSession(jobId) {
+function extendSession(jobId, timeExtend) {
     const session = activeSessions[jobId];
     if (!session) return false;
 
@@ -60,8 +58,10 @@ function extendSession(jobId) {
 
     // 2. Calcula novos tempos
     const now = Date.now();
-    let newExpiration = session.expiresAt + EXTENSION_TIME;
-    
+    const maxTime = 1000 * 60 * 60 * 24;
+    let newExpiration = session.expiresAt + timeExtend;
+    if ((newExpiration - now) > maxTime) newExpiration = now + maxTime; 
+
     // Calcula quanto tempo falta a partir de AGORA até a nova expiração
     const timeRemaining = newExpiration - now;
 

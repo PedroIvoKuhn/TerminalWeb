@@ -74,6 +74,21 @@ nav {
     background-color: #e74c3c;
 }
 
+.btn-extend-24h {
+    background-color: #3498db;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.btn-extend-24h:hover {
+    background-color: #34acdb;
+}
+
 #terminal-container {
     display: none;
 }

@@ -116,6 +116,9 @@ socket.on('session:update', (data) => {
     startCountdown(data.expiresAt);
     setTimeout(() => {
         sessionModal.style.display = 'none';
+        const button24h = document.getElementById('btn-extend-24h');
+        button24h.textContent = "+24 Horas";
+        button24h.disabled = false;
 
         document.querySelector('#session-modal h2').textContent = "⚠️ A sessão vai expirar!";
         document.getElementById('btn-extend').disabled = false;
@@ -134,7 +137,7 @@ socket.on('session:expired', () => {
     document.getElementById('expired-modal').style.display = 'flex';
 });
 
-// --- BOTÕES DOS MODAIS ---
+// --- BOTÕES ---
 
 document.getElementById('btn-extend').addEventListener('click', (e) => {
     e.target.disabled = true;
@@ -150,6 +153,12 @@ document.getElementById('btn-ignore').addEventListener('click', () => {
 
 document.getElementById('btn-reload').addEventListener('click', () => {
     window.location.reload();
+});
+
+document.getElementById('btn-extend-24h').addEventListener('click', (e) => {
+    e.target.disabled = true;
+    e.target.textContent = "Processando...";
+    socket.emit('session:extend-24h');
 });
 
 // --- EVENTOS DA SESSÃO ---

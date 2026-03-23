@@ -47,10 +47,12 @@ module.exports = (io) => {
         });
 
         socket.on('session:extend-response', () => {
-            const newExpiresAt = sessionService.extendSession(socket.data.jobId);
-                if (newExpiresAt) {
-                    socket.emit('session:update', { expiresAt: newExpiresAt });
-                }
+          handleExtendSession(socket, 1000 * 60); // 1 minuto 
+        });
+
+        socket.on('session:extend-24h', () => {
+          console.log('chamando handle');
+          handleExtendSession(socket, 1000 * 60 * 60 * 24);
         });
 
         socket.on('restore-session', async ({ jobId }) => {
@@ -152,4 +154,11 @@ async function handlePodError(err, socket, jobId, secretName) {
     console.error('Erro no ciclo de vida do Pod:', err);
     socket.emit('output', `\r\n[ERRO DO BACKEND]: ${err.message}\r\nIniciando limpeza...`);
     await k8sService.cleanupJob(jobId, secretName);
+}
+
+function handleExtendSession(socket, timeExtend) {
+  const newExpiresAt = sessionService.extendSession(socket.data.jobId, timeExtend);
+    if (newExpiresAt) {
+      socket.emit('session:update', { expiresAt: newExpiresAt });
+    }
 }
