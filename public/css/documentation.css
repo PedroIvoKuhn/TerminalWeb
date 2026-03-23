@@ -1,0 +1,28 @@
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  background-color: #1e1e1e;
+  padding: 40px;
+  border-radius: 8px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+}
+
+.faq-item {
+  background-color: #3c3c3c;
+  padding: 15px 20px;
+  margin-bottom: 15px;
+  border-radius: 5px;
+}
+
+.faq-item h3 {
+  margin-top: 0;
+  color: #f39c12;
+}
+
+code {
+  background-color: #000;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;  
+}

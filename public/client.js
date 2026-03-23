@@ -89,14 +89,26 @@ function startCountdown(expiresAt) {
     countdownInterval = setInterval(() => {
         const now = Date.now();
         const timeLeft = expiresAt - now;
+        if ( timeLeft > (1000 * 60 * 60 * 12) ) {
+          const btn = document.getElementById('btn-extend-24h')
+          if (!btn.disabled) {
+            btn.disabled = true;
+            btn.title = "Disponível apenas quando faltar menos de 12 horas para encerrar a sessão.";
+          } 
+        } else {
+          const btn = document.getElementById('btn-extend-24h');
+          if (btn.disabled && btn.textContent !== "Processando...") {
+            btn.disabled = false;
+            btn.title = "";
+          } 
+        }
 
         // Atualiza o texto
         countdownDisplay.textContent = formatTime(timeLeft);
         const timer = document.getElementById('timer');
 
         // Se faltar menos de 20 minutos (ou o tempo do aviso), deixa vermelho
-        // Ex: 20 minutos = 1200000 ms
-        if (timeLeft < 1200000) { 
+        if (timeLeft < 1000 * 60 * 20) { 
             timer.classList.add('timer-critical');
         } else {
             timer.classList.remove('timer-critical');
