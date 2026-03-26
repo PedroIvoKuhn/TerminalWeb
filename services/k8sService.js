@@ -81,7 +81,7 @@ async function waitForPodRunning(name) {
     });
 }
 
-async function createClusterResources(jobId, numMachines, image, keys) {
+async function createClusterResources(jobId, numMachines, image, keys, expiresAt, numMachines) {
     const masterPodName = `master-${jobId}`;
     const serviceName = `svc-${jobId}`;
     const secretName = `ssh-keys-${jobId}`;
@@ -108,7 +108,11 @@ async function createClusterResources(jobId, numMachines, image, keys) {
         const podManifest = {
             metadata: {
                 name: podK8sName,
-                labels: { 'job-id': jobId, 'role': i === 0 ? 'master' : 'worker' }
+                labels: { 'job-id': jobId, 'role': i === 0 ? 'master' : 'worker' },
+                annotations: {
+                  'terminalWeb/expiresAt': expiresAt.toString(),
+                  'terminalWeb/numMachines': numMachines.toString()
+                }
             },
             spec: {
                 securityContext: {
@@ -188,4 +192,72 @@ async function cleanupJob(jobId, secretName) {
     }
 }
 
-module.exports = { waitForPodRunning, cleanupJob, createClusterResources };
+async function getActiveJobs() {
+  try {
+    const response = await k8sApi.listNamespacedPod(
+      namespace,
+      undefined, // 2. pretty
+      undefined, // 3. allowWatchBookmarks
+      undefined, // 4. _continue
+      undefined, // 5. fieldSelector
+      `role=master` // 6. labelSelector
+    );
+
+    const pods = response.body.items;
+    const activeSessionsData = [];
+
+    for (const pod of pods) {
+      const labels = pod.metadata.labels || {};
+      const annotations = pod.metadata.annotations || {};
+
+      const jobId = labels["job-id"];
+      const expiresAtStr = annotations["terminalWeb/expiresAt"];
+      const numMachinesStr =  annotations["terminalWeb/numMachines"];
+
+      if (jobId && expiresAtStr) {
+        activeSessionsData.push({
+          jobId: jobId,
+          expiresAt: parseInt(expiresAtStr, 10),
+          numMachines: parseInt(numMachinesStr, 10) || 2
+        })
+      }
+    }
+    
+    return activeSessionsData;
+  } catch (error) {
+    console.error("Erro ao buscar sessões ativas no K8s:", error);
+    return [];
+  }
+}
+
+async function updateJobExpiration(jobId, newExpiresAt) {
+    try {
+        const podName = `master-${jobId}`;
+        
+        const patch = {
+            metadata: {
+                annotations: {
+                    'terminalWeb/expiresAt': newExpiresAt.toString()
+                }
+            }
+        };
+
+        const options = { 
+            headers: { 'Content-Type': 'application/strategic-merge-patch+json' } 
+        };
+
+        await k8sApi.patchNamespacedPod(
+            podName, 
+            namespace, 
+            patch, 
+            undefined, undefined, undefined, undefined, undefined, 
+            options
+        );
+        
+        console.log(`[K8s] Annotation atualizada com sucesso para o Job ${jobId}`);
+    } catch (err) {
+        console.error(`[ERRO K8s] Falha ao atualizar a expiração do Job ${jobId}:`, err);
+    }
+}
+
+module.exports = { waitForPodRunning, cleanupJob, createClusterResources, getActiveJobs, updateJobExpiration};

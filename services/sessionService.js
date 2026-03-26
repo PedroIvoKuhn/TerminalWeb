@@ -1,11 +1,11 @@
 const k8sService = require('./k8sService');
 
 // Configurações de Tempo (em milissegundos)
-
+/*
 const INITIAL_DURATION = 60 * 1000;             // 1 minuto
 const WARNING_BEFORE = 55 * 1000;               // 55 Segundos antes de acabar
 // */
-/*
+
 const INITIAL_DURATION = 2 * 60 * 60 * 1000;  // 2 Horas
 const WARNING_BEFORE = 20 * 60 * 1000;        // 20 Minutos antes de acabar
 // */
@@ -46,7 +46,7 @@ function sendWarning(jobId) {
     }
 }
 
-function extendSession(jobId, timeExtend) {
+async function extendSession(jobId, timeExtend) {
     const session = activeSessions[jobId];
     if (!session) return false;
 
@@ -62,6 +62,7 @@ function extendSession(jobId, timeExtend) {
     let newExpiration = session.expiresAt + timeExtend;
     if ((newExpiration - now) > maxTime) newExpiration = now + maxTime; 
 
+    await k8sService.updateJobExpiration(jobId, newExpiration);
     // Calcula quanto tempo falta a partir de AGORA até a nova expiração
     const timeRemaining = newExpiration - now;
 
@@ -90,23 +91,22 @@ function restoreSession(jobId, newSocket) {
 
 async function terminateSession(jobId) {
     const session = activeSessions[jobId];
-    if (session) {
-        console.log(`[SESSION] Tempo esgotado para ${jobId}. Encerrando...`);
-        
-        // Avisa o usuário se ele ainda estiver conectado
+    if (session && session.socket) {
         session.socket.emit('session:expired');
-        session.socket.disconnect(true); // Força desconexão
-        
-        // Limpa recursos do Kubernetes
+        session.socket.disconnect(true); 
+    }
+    
+    try {
         const secretName = `ssh-keys-${jobId}`;
         await k8sService.cleanupJob(jobId, secretName);
-
-        // Remove da memória
-        clearSession(jobId);
+        console.log(`[SESSION] K8s limpo com sucesso para ${jobId}.`);
+    } catch (err) {
+        console.error(`[ERRO] Falha ao limpar K8s do job ${jobId}:`, err);
     }
+
+    clearSession(jobId);
 }
 
-// Função para limpar a memória se o usuário sair voluntariamente
 function clearSession(jobId) {
     if (activeSessions[jobId]) {
         clearTimeout(activeSessions[jobId].warnTimer);
@@ -115,4 +115,37 @@ function clearSession(jobId) {
     }
 }
 
-module.exports = { startSession, extendSession, restoreSession, clearSession };
+async function syncSessionsK8s() {
+  const sessionsK8s = await k8sService.getActiveJobs();
+
+  for (const session of sessionsK8s) {
+    const timeLeft = session.expiresAt - Date.now();
+    if (timeLeft <= 0) {
+      terminateSession(session.jobId);
+    } else {
+      console.log(`[SYNC] Restaurando timers`);
+      
+      const warnTimeLeft = timeLeft - WARNING_BEFORE; 
+      
+      activeSessions[session.jobId] = {
+        expiresAt: session.expiresAt,
+        numMachines: session.numMachines,
+        socket: null,
+        
+        killTimer: setTimeout(() => {
+          terminateSession(session.jobId);
+        }, timeLeft),
+       
+        warnTimer: warnTimeLeft > 0 
+          ? setTimeout(() => {
+              sendWarning(session.jobId); 
+            }, warnTimeLeft)
+          : setTimeout(() => {
+              sendWarning(session.jobId);
+            }, null)
+      };
+    }
+  }
+}
+
+module.exports = { startSession, extendSession, restoreSession, clearSession, syncSessionsK8s };

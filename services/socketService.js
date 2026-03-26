@@ -17,16 +17,17 @@ module.exports = (io) => {
                 // Gerar Chaves
                 socket.emit('output', 'Gerando chaves e configuração SSH...\r\n');
                 const keys = await sshService.generateSSHKeys();
+              
+                // Iniciar contador
+                const expiresAt = sessionService.startSession(jobId, socket, numMachines);
+                socket.emit('session:update', { expiresAt: expiresAt });
 
                 // Criar a infraestrutura
-                const { masterPodName } = await k8sService.createClusterResources(jobId, numMachines, image, keys);
+                const { masterPodName } = await k8sService.createClusterResources(jobId, numMachines, image, keys, expiresAt, numMachines);
                 socket.emit('output', `Pods criados. Aguardando o nó mestre ficar pronto...\r\n`);
 
                 // Esperar ficar pronto
                 await k8sService.waitForPodRunning(masterPodName);
-
-                const expiresAt = sessionService.startSession(jobId, socket, numMachines);
-                socket.emit('session:update', { expiresAt: expiresAt });
 
                 const machineAliases = ['master'];
                 for (let i = 1; i < numMachines; i++) {
@@ -46,13 +47,12 @@ module.exports = (io) => {
             }
         });
 
-        socket.on('session:extend-response', () => {
-          handleExtendSession(socket, 1000 * 60); // 1 minuto 
+        socket.on('session:extend-response', async () => {
+          await handleExtendSession(socket, 1000 * 60 * 60); // 1 minuto / 1 hora 
         });
 
-        socket.on('session:extend-24h', () => {
-          console.log('chamando handle');
-          handleExtendSession(socket, 1000 * 60 * 60 * 24);
+        socket.on('session:extend-24h', async () => {
+          await handleExtendSession(socket, 1000 * 60 * 60 * 24);
         });
 
         socket.on('restore-session', async ({ jobId }) => {
@@ -156,8 +156,8 @@ async function handlePodError(err, socket, jobId, secretName) {
     await k8sService.cleanupJob(jobId, secretName);
 }
 
-function handleExtendSession(socket, timeExtend) {
-  const newExpiresAt = sessionService.extendSession(socket.data.jobId, timeExtend);
+async function handleExtendSession(socket, timeExtend) {
+  const newExpiresAt = await sessionService.extendSession(socket.data.jobId, timeExtend);
     if (newExpiresAt) {
       socket.emit('session:update', { expiresAt: newExpiresAt });
     }

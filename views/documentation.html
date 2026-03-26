@@ -16,12 +16,12 @@
     </nav>
 
     <div class="container">
-        <h1>Guia de Uso do Cluster MPI</h1>
-        <p>Bem-vindo ao Web Terminal! Esta ferramenta provisiona um cluster privado e temporário exclusivamente para você, permitindo a execução de aplicações paralelas (MPI) diretamente do seu navegador.</p>
+        <h1>Guia de Uso</h1>
+        <p>Bem-vindo ao Terminal Web! Esta ferramenta provisiona um cluster privado e temporário exclusivamente para você, permitindo a execução de aplicações paralelas diretamente do seu navegador.</p>
 
         <h2>🚀 Como Começar</h2>
         <ol>
-            <li><strong>Escolha o número de nós:</strong> Na tela inicial, digite quantas máquinas você deseja para o seu cluster (ex: 3 máquinas gerarão <code>1 master</code> e <code>2 workers</code>).</li>
+            <li><strong>Escolha o número de nós:</strong> Na tela inicial, digite quantas máquinas você deseja para o seu cluster (ex: 3 máquinas irá gerar <code>1 master</code> e <code>2 workers</code>).</li>
             <li><strong>Aguarde o provisionamento:</strong> O sistema criará os contêineres e configurará automaticamente a rede e as chaves SSH seguras entre eles.</li>
             <li><strong>Acesse o Terminal:</strong> Assim que os nós estiverem prontos, você será conectado ao nó <code>master</code>. A partir dele, você comanda todo o cluster.</li>
         </ol>
@@ -36,11 +36,12 @@
 
         <h2>⏳ Tempo de Sessão e Limpeza Automática</h2>
         <p>Para garantir que os recursos do servidor estejam disponíveis para todos os alunos, sua sessão possui um <strong>tempo limite de 2 horas</strong>.</p>
+        <p>Caso cair sua internet, ou tiver que sair por um tempo, fique tranquilo que a sua sessão é restaurada enquanto o tempo não acabar.</p>
         <ul>
             <li>Um cronômetro ficará visível no topo da tela.</li>
             <li>Faltando 20 minutos para o fim, a barra ficará vermelha e um aviso aparecerá.</li>
             <li>Você poderá clicar em <strong>"Sim, preciso de mais tempo"</strong> para estender a sessão por mais 1 hora.</li>
-            <li>Caso precise rodar uma aplicação por mais tempo, terá um botão para extender a sessão por +24 horas, e só poderá extender novamente depois que passar no mínimo 12 horas.</li>
+            <li>Caso precise rodar uma aplicação por mais tempo, terá um botão para extender a sessão por +24 horas, e só poderá extender novamente depois que passar no mínimo 12 horas. Pedimos que utilize esse recurso com <strong>consciência</strong>.</li>
         </ul>
 
         <hr style="border: 1px solid #444; margin: 40px 0;">
@@ -49,7 +50,7 @@
 
         <div class="faq-item">
             <h3>Meus arquivos ficam salvos após eu fechar o navegador?</h3>
-            <p><strong>Não.</strong> A arquitetura do cluster é efêmera. Assim que a sessão é encerrada (seja pelo tempo limite ou ao fechar a conexão), todos os contêineres e discos virtuais são destruídos permanentemente. Salve seus códigos localmente (ex: usando um repositório Git ou copiando o texto).</p>
+            <p><strong>Não.</strong> Assim que a sessão é encerrada (seja pelo tempo limite ou ao fechar a conexão), todos os contêineres e discos virtuais são destruídos permanentemente. Salve seus códigos localmente (ex: usando um repositório Git ou copiando o texto).</p>
         </div>
 
         <div class="faq-item">
