@@ -1,11 +1,11 @@
 const k8sService = require('./k8sService');
 
 // Configurações de Tempo (em milissegundos)
-/*
+
 const INITIAL_DURATION = 60 * 1000;             // 1 minuto
 const WARNING_BEFORE = 55 * 1000;               // 55 Segundos antes de acabar
 // */
-
+/*
 const INITIAL_DURATION = 2 * 60 * 60 * 1000;  // 2 Horas
 const WARNING_BEFORE = 20 * 60 * 1000;        // 20 Minutos antes de acabar
 // */
@@ -20,7 +20,7 @@ function startSession(jobId, socket, numMachines) {
 
     // Salva os dados da sessão
     activeSessions[jobId] = {
-        socket: socket,
+        sockets: new Set([socket]),
         numMachines: numMachines,
         expiresAt: expiresAt,
         // 1. Timer do Aviso
@@ -37,13 +37,13 @@ function startSession(jobId, socket, numMachines) {
 }
 
 function sendWarning(jobId) {
-    const session = activeSessions[jobId];
-    if (session && session.socket) {
-        console.log(`[SESSION] Enviando aviso de expiração para ${jobId}`);
-        session.socket.emit('session:warning', { 
-            timeLeft: WARNING_BEFORE / 60000 
-        });
-    }
+  const session = activeSessions[jobId];
+  if (session && session.sockets) {
+    console.log(`[SESSION] Enviando aviso de expiração para ${jobId}`);
+    session.sockets.forEach(socket => {
+      socket.emit("session:warning");
+    });
+  }
 }
 
 async function extendSession(jobId, timeExtend) {
@@ -62,12 +62,12 @@ async function extendSession(jobId, timeExtend) {
     let newExpiration = session.expiresAt + timeExtend;
     if ((newExpiration - now) > maxTime) newExpiration = now + maxTime; 
 
-    await k8sService.updateJobExpiration(jobId, newExpiration);
     // Calcula quanto tempo falta a partir de AGORA até a nova expiração
     const timeRemaining = newExpiration - now;
 
     // Atualiza o objeto
     session.expiresAt = newExpiration;
+    await k8sService.updateJobExpiration(jobId, newExpiration);
 
     // 3. Recria os timers
     session.warnTimer = setTimeout(() => {
@@ -78,22 +78,31 @@ async function extendSession(jobId, timeExtend) {
         terminateSession(jobId);
     }, timeRemaining);
     
-    return newExpiration;
+    // Manda o aviso para todos os sockets
+    if (session.sockets) {
+        session.sockets.forEach(socket => {
+            socket.emit('session:update', { expiresAt: newExpiration });
+        });
+    }
 }
 
 function restoreSession(jobId, newSocket) {
     const session = activeSessions[jobId];
     if(!session) return false;
-    session.socket = newSocket;
+
+    session.sockets.add(newSocket);
+
     const { expiresAt, numMachines } = session;
     return { expiresAt, numMachines };
 }
 
 async function terminateSession(jobId) {
     const session = activeSessions[jobId];
-    if (session && session.socket) {
-        session.socket.emit('session:expired');
-        session.socket.disconnect(true); 
+    if (session && session.sockets) {
+      session.sockets.forEach(socket => {
+        socket.emit('session:expired');
+        socket.disconnect(true); 
+      });
     }
     
     try {
@@ -130,7 +139,7 @@ async function syncSessionsK8s() {
       activeSessions[session.jobId] = {
         expiresAt: session.expiresAt,
         numMachines: session.numMachines,
-        socket: null,
+        sockets: new Set(),
         
         killTimer: setTimeout(() => {
           terminateSession(session.jobId);
@@ -148,4 +157,11 @@ async function syncSessionsK8s() {
   }
 }
 
-module.exports = { startSession, extendSession, restoreSession, clearSession, syncSessionsK8s };
+function removeSocket(jobId, socketToRemove) {
+  const session = activeSessions[jobId];
+  if ( session && session.sockets) {
+    session.sockets.delete(socketToRemove);
+  }
+}
+
+module.exports = { startSession, extendSession, restoreSession, terminateSession, syncSessionsK8s, removeSocket };

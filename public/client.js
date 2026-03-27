@@ -1,5 +1,8 @@
 const socket = io();
 
+const urlParams = new URLSearchParams(window.location.search);
+const targetMachine = urlParams.get("machine") || "master";
+
 // --- Elementos da Página ---
 const setupContainer = document.getElementById('setup-container');
 const terminalContainer = document.getElementById('terminal-container');
@@ -53,9 +56,21 @@ socket.on('session-ready', (data) => {
     localStorage.setItem("jobId", data.jobId);
 
     data.aliases.forEach(alias => {
-        const listItem = document.createElement('li');
-        listItem.textContent = alias;
-        machineList.appendChild(listItem);
+        const btn = document.createElement('button');
+        btn.textContent = `${alias}`;
+        btn.className = 'btn-machine';
+
+        if (alias === targetMachine) {
+          btn.disabled = true;
+        }
+
+        btn.onclick = () => {
+          // Pega a URL atual, limpa parâmetros velhos e adiciona o target novo
+          const novaUrl = `${window.location.pathname}?machine=${alias}`;
+          window.open(novaUrl, '_blank');
+        };
+
+        machineList.appendChild(btn);
     });
 });
 
@@ -167,6 +182,10 @@ document.getElementById('btn-reload').addEventListener('click', () => {
     window.location.reload();
 });
 
+document.getElementById('btn-kill-session').addEventListener('click', () => {
+    socket.emit("kill-session");
+});
+
 document.getElementById('btn-extend-24h').addEventListener('click', (e) => {
     e.target.disabled = true;
     e.target.textContent = "Processando...";
@@ -177,9 +196,8 @@ document.getElementById('btn-extend-24h').addEventListener('click', (e) => {
 const jobId = localStorage.getItem("jobId");
 if(jobId) {
     initializeTerminal();
-    socket.emit("restore-session", { jobId });
+    socket.emit("restore-session", { 
+    jobId: jobId,
+    machine: targetMachine,
+  });
 }
-
-document.getElementById('btn-kill-session').addEventListener('click', () => {
-    socket.emit("kill-session");
-});

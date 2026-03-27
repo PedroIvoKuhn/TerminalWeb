@@ -48,16 +48,17 @@ module.exports = (io) => {
         });
 
         socket.on('session:extend-response', async () => {
-          await handleExtendSession(socket, 1000 * 60 * 60); // 1 minuto / 1 hora 
+          await sessionService.extendSession(socket.data.jobId, 1000 * 60 * 60);
         });
 
         socket.on('session:extend-24h', async () => {
-          await handleExtendSession(socket, 1000 * 60 * 60 * 24);
+          await sessionService.extendSession(socket.data.jobId, 1000 * 60 * 60 * 24);
         });
 
-        socket.on('restore-session', async ({ jobId }) => {
+        socket.on('restore-session', async ({ jobId, machine }) => {
             const secretName = `ssh-keys-${jobId}`;
-            const masterPodName = `master-${jobId}`;
+            const requestedMachine = machine || "master";
+            const podName = `${requestedMachine}-${jobId}`;
             socket.data.jobId = jobId;
            
             try {
@@ -76,9 +77,15 @@ module.exports = (io) => {
 
                 socket.emit('session-ready', { 
                     aliases: machineAliases,
-                    jobId: jobId });
+                    jobId: jobId 
+                });
 
-                await connectTerminal(socket, jobId, masterPodName);
+                if (!machineAliases.includes(requestedMachine)) {
+                  socket.emit('output', `\r\n[ERRO] A máquina '${requestedMachine}' não existe neste cluster. Se você deseja mais máquinas crie uma nova sessão.\r\n`);
+                  return; 
+                }
+
+                await connectTerminal(socket, jobId, podName);
             } catch (err) {
                 await handlePodError(err, socket, jobId, secretName);
             }
@@ -88,11 +95,15 @@ module.exports = (io) => {
             const jobId = socket.data.jobId;
             if (!jobId) return;
 
-            const secretName = `ssh-keys-${jobId}`;
-            sessionService.clearSession(jobId);
-            await k8sService.cleanupJob(jobId, secretName);
-            socket.emit("session:expired")
-        })
+            await sessionService.terminateSession(jobId);
+        });
+
+        socket.on("disconnect", () => {
+            const jobId = socket.data.jobId;
+            if (!jobId) return;
+
+            sessionService.removeSocket(jobId, socket);
+        });
     });
 };
 
@@ -154,11 +165,4 @@ async function handlePodError(err, socket, jobId, secretName) {
     console.error('Erro no ciclo de vida do Pod:', err);
     socket.emit('output', `\r\n[ERRO DO BACKEND]: ${err.message}\r\nIniciando limpeza...`);
     await k8sService.cleanupJob(jobId, secretName);
-}
-
-async function handleExtendSession(socket, timeExtend) {
-  const newExpiresAt = await sessionService.extendSession(socket.data.jobId, timeExtend);
-    if (newExpiresAt) {
-      socket.emit('session:update', { expiresAt: newExpiresAt });
-    }
 }
