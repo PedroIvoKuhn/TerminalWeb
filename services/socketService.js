@@ -17,45 +17,48 @@ module.exports = (io) => {
                 // Gerar Chaves
                 socket.emit('output', 'Gerando chaves e configuração SSH...\r\n');
                 const keys = await sshService.generateSSHKeys();
+              
+                // Iniciar contador
+                const expiresAt = sessionService.startSession(jobId, socket, numMachines);
+                socket.emit('session:update', { expiresAt: expiresAt });
 
                 // Criar a infraestrutura
-                const { masterPodName } = await k8sService.createClusterResources(jobId, numMachines, image, keys);
+                const { masterPodName } = await k8sService.createClusterResources(jobId, numMachines, image, keys, expiresAt, numMachines);
                 socket.emit('output', `Pods criados. Aguardando o nó mestre ficar pronto...\r\n`);
 
                 // Esperar ficar pronto
                 await k8sService.waitForPodRunning(masterPodName);
-
-                const expiresAt = sessionService.startSession(jobId, socket, numMachines);
-                socket.emit('session:update', { expiresAt: expiresAt });
 
                 const machineAliases = ['master'];
                 for (let i = 1; i < numMachines; i++) {
                     machineAliases.push(`worker-${i}`);
                 }
 
+                await connectTerminal(socket, jobId, masterPodName);
+                
                 socket.emit('session-ready', { 
                     aliases: machineAliases,
-                    jobId: jobId });
-
+                    jobId: jobId 
+                });
                 socket.emit('output', `\r\n✅ Conectado! Apelidos SSH configurados.\r\n`);
                 socket.emit('output', `Tente: ssh worker-1 \r\n\r\n`);
-
-                await connectTerminal(socket, jobId, masterPodName);
             } catch (err) {
                 await handlePodError(err, socket, jobId, secretName);
             }
         });
 
-        socket.on('session:extend-response', () => {
-            const newExpiresAt = sessionService.extendSession(socket.data.jobId);
-                if (newExpiresAt) {
-                    socket.emit('session:update', { expiresAt: newExpiresAt });
-                }
+        socket.on('session:extend-response', async () => {
+          await sessionService.extendSession(socket.data.jobId, 1000 * 60 * 60);
         });
 
-        socket.on('restore-session', async ({ jobId }) => {
+        socket.on('session:extend-24h', async () => {
+          await sessionService.extendSession(socket.data.jobId, 1000 * 60 * 60 * 24);
+        });
+
+        socket.on('restore-session', async ({ jobId, machine }) => {
             const secretName = `ssh-keys-${jobId}`;
-            const masterPodName = `master-${jobId}`;
+            const requestedMachine = machine || "master";
+            const podName = `${requestedMachine}-${jobId}`;
             socket.data.jobId = jobId;
            
             try {
@@ -72,11 +75,17 @@ module.exports = (io) => {
                     machineAliases.push(`worker-${i}`);
                 }
 
+                await connectTerminal(socket, jobId, podName);
+                
                 socket.emit('session-ready', { 
                     aliases: machineAliases,
-                    jobId: jobId });
+                    jobId: jobId 
+                });
 
-                await connectTerminal(socket, jobId, masterPodName);
+                if (!machineAliases.includes(requestedMachine)) {
+                  socket.emit('output', `\r\n[ERRO] A máquina '${requestedMachine}' não existe neste cluster. Se você deseja mais máquinas crie uma nova sessão.\r\n`);
+                  return; 
+                }
             } catch (err) {
                 await handlePodError(err, socket, jobId, secretName);
             }
@@ -86,11 +95,15 @@ module.exports = (io) => {
             const jobId = socket.data.jobId;
             if (!jobId) return;
 
-            const secretName = `ssh-keys-${jobId}`;
-            sessionService.clearSession(jobId);
-            await k8sService.cleanupJob(jobId, secretName);
-            socket.emit("session:expired")
-        })
+            await sessionService.terminateSession(jobId);
+        });
+
+        socket.on("disconnect", () => {
+            const jobId = socket.data.jobId;
+            if (!jobId) return;
+
+            sessionService.removeSocket(jobId, socket);
+        });
     });
 };
 
@@ -141,10 +154,19 @@ function handleTerminalClose(socket) {
 function setupTerminalInput(socket, execWs) {
     // evita enviar uma letra duas vezes se for chamado novamente
     socket.removeAllListeners('input');
+    socket.removeAllListeners('resize');
+
     socket.on('input', (data) => { 
         if (execWs && execWs.readyState === 1) { 
             execWs.send(Buffer.from('\x00' + data)); 
         } 
+    });
+
+    socket.on('resize', ({ cols, rows }) => {
+        if (execWs && execWs.readyState === 1) {
+            const resizeMsg = JSON.stringify({ Width: cols, Height: rows });
+            execWs.send(Buffer.from('\x04' + resizeMsg));
+        }
     });
 }
 

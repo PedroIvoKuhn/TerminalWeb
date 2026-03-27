@@ -1,7 +1,7 @@
 
 # Terminal Web para Clusters
 
-Uma aplicação web que provisiona, sob demanda, ambientes já pré-configurados com uma ou múltiplas máquinas.(A versão atual está funcionando apenas com o ambiente de MPI). A solução utiliza Kubernetes para orquestrar contêineres dinamicamente, oferecendo a cada usuário um cluster privado e isolado, acessível diretamente pelo navegador.
+Uma aplicação web que provisiona, sob demanda, ambientes já pré-configurados com uma ou múltiplas máquinas.(A versão principal está funciona com o ambiente de MPI). A solução utiliza Kubernetes para orquestrar contêineres dinamicamente, oferecendo a cada usuário um cluster privado e isolado, acessível diretamente pelo navegador.
 
 
 ## Funcionalidades
@@ -13,6 +13,8 @@ Uma aplicação web que provisiona, sob demanda, ambientes já pré-configurados
 - **Segurança:** Um par de chaves SSH novo e exclusivo é gerado para cada sessão, garantindo que apenas os nós de um mesmo ambiente possam se comunicar.
 - **Acesso Simplificado:** Conectividade SSH pré-configurada entre os nós do ambiente, com apelidos simples como master e worker-1.
 - **Limpeza Automática:** Todos os recursos criados no Kubernetes são automaticamente removidos ao final da sessão, evitando o desperdício de recursos.
+- **Restauração de sessão:** Mesmo se sair da página, seja por ter fechado sem querer a aba ou tenha ocilado sua internet, ou até mesmo, o servidor reiniciado a sessão se mantem aberta por 2 horas, podendo estender 1 hora toda vez que faltar 20 minutos para encerrar a sessão.
+- **Troca de Ambiente:** Faz o download automaticamente do Docker Hub, basta trocar o nome da imagem, e a imagem ter a iso base do linux(para a config do SSH).
 
 
 ## Stack utilizada

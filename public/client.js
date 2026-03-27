@@ -1,5 +1,8 @@
 const socket = io();
 
+const urlParams = new URLSearchParams(window.location.search);
+const targetMachine = urlParams.get("machine") || "master";
+
 // --- Elementos da Página ---
 const setupContainer = document.getElementById('setup-container');
 const terminalContainer = document.getElementById('terminal-container');
@@ -22,6 +25,11 @@ function initializeTerminal() {
     terminalContainer.style.display = 'block';
 
     term.open(document.getElementById('terminal'));
+
+    term.onResize((size) => {
+        socket.emit('resize', { cols: size.cols, rows: size.rows });
+    });
+
     fitAddon.fit();
     window.addEventListener('resize', () => fitAddon.fit());
 }
@@ -53,10 +61,27 @@ socket.on('session-ready', (data) => {
     localStorage.setItem("jobId", data.jobId);
 
     data.aliases.forEach(alias => {
-        const listItem = document.createElement('li');
-        listItem.textContent = alias;
-        machineList.appendChild(listItem);
+        const btn = document.createElement('button');
+        btn.textContent = `${alias}`;
+        btn.className = 'btn-machine';
+
+        if (alias === targetMachine) {
+          btn.disabled = true;
+        }
+
+        btn.onclick = () => {
+          // Pega a URL atual, limpa parâmetros velhos e adiciona o target novo
+          const novaUrl = `${window.location.pathname}?machine=${alias}`;
+          window.open(novaUrl, '_blank');
+        };
+
+        machineList.appendChild(btn);
     });
+    setTimeout(() => {
+        console.log("Terminal sincronizando dimensões:", term.cols, term.rows);
+        fitAddon.fit();
+        socket.emit('resize', { cols: term.cols, rows: term.rows });
+    }, 500);
 });
 
 socket.on('connect_error', (err) => {
@@ -89,14 +114,26 @@ function startCountdown(expiresAt) {
     countdownInterval = setInterval(() => {
         const now = Date.now();
         const timeLeft = expiresAt - now;
+        if ( timeLeft > (1000 * 60 * 60 * 12) ) {
+          const btn = document.getElementById('btn-extend-24h')
+          if (!btn.disabled) {
+            btn.disabled = true;
+            btn.title = "Disponível apenas quando faltar menos de 12 horas para encerrar a sessão.";
+          } 
+        } else {
+          const btn = document.getElementById('btn-extend-24h');
+          if (btn.disabled && btn.textContent !== "Processando...") {
+            btn.disabled = false;
+            btn.title = "";
+          } 
+        }
 
         // Atualiza o texto
         countdownDisplay.textContent = formatTime(timeLeft);
         const timer = document.getElementById('timer');
 
         // Se faltar menos de 20 minutos (ou o tempo do aviso), deixa vermelho
-        // Ex: 20 minutos = 1200000 ms
-        if (timeLeft < 1200000) { 
+        if (timeLeft < 1000 * 60 * 20) { 
             timer.classList.add('timer-critical');
         } else {
             timer.classList.remove('timer-critical');
@@ -116,6 +153,9 @@ socket.on('session:update', (data) => {
     startCountdown(data.expiresAt);
     setTimeout(() => {
         sessionModal.style.display = 'none';
+        const button24h = document.getElementById('btn-extend-24h');
+        button24h.textContent = "+24 Horas";
+        button24h.disabled = false;
 
         document.querySelector('#session-modal h2').textContent = "⚠️ A sessão vai expirar!";
         document.getElementById('btn-extend').disabled = false;
@@ -134,7 +174,7 @@ socket.on('session:expired', () => {
     document.getElementById('expired-modal').style.display = 'flex';
 });
 
-// --- BOTÕES DOS MODAIS ---
+// --- BOTÕES ---
 
 document.getElementById('btn-extend').addEventListener('click', (e) => {
     e.target.disabled = true;
@@ -152,13 +192,22 @@ document.getElementById('btn-reload').addEventListener('click', () => {
     window.location.reload();
 });
 
+document.getElementById('btn-kill-session').addEventListener('click', () => {
+    socket.emit("kill-session");
+});
+
+document.getElementById('btn-extend-24h').addEventListener('click', (e) => {
+    e.target.disabled = true;
+    e.target.textContent = "Processando...";
+    socket.emit('session:extend-24h');
+});
+
 // --- EVENTOS DA SESSÃO ---
 const jobId = localStorage.getItem("jobId");
 if(jobId) {
     initializeTerminal();
-    socket.emit("restore-session", { jobId });
+    socket.emit("restore-session", { 
+    jobId: jobId,
+    machine: targetMachine,
+  });
 }
-
-document.getElementById('btn-kill-session').addEventListener('click', () => {
-    socket.emit("kill-session");
-});

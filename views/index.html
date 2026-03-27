@@ -7,6 +7,7 @@
     <title>Web Terminal</title>
     <meta name="image" content="{{IMAGE}}">
     <link rel="stylesheet" href="/xterm/css/xterm.css" />
+    <link rel="stylesheet" href="/css/global.css"/> 
     <link rel="stylesheet" href="/css/index.css" />
 </head>
 
@@ -21,12 +22,13 @@
                 <span>Tempo Restante:&nbsp;</span>
                 <span id="countdown-display">--:--:--</span>
             </div>
-                <button id="btn-kill-session" class="btn-danger">Encerrar Sessão</button>
+            <button id="btn-kill-session" class="btn-danger">Encerrar Sessão</button>
+            <button id="btn-extend-24h" class="btn-extend-24h">+24 Horas</button>
         </div>
     </nav>
 
     <h1>Cluster via Web Terminal - Bem-vindo, {{NOME_USUARIO}}!</h1>
-    
+
     <div id="setup-container">
         <h2>Configuração do Cluster</h2>
         <p>Você está usando a imagem: {{IMAGE}}</p>

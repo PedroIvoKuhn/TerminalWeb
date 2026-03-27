@@ -6,6 +6,7 @@ const { Server } = require('socket.io');
 
 const ltiController = require('./controllers/ltiController');
 const socketService = require('./services/socketService');
+const sessionService = require('./services/sessionService.js')
 
 const app = express();
 const server = http.createServer(app);
@@ -19,9 +20,10 @@ app.use('/xterm-addon-fit', express.static(path.join(__dirname, 'node_modules/xt
 async function start() {
     try {
         await ltiController.setup(app);
-
+  
         socketService(io);
 
+        await sessionService.syncSessionsK8s();
         server.listen(PORT, '0.0.0.0', () => {
             console.log(`Servidor rodando em http://localhost:${PORT}`);
         })
