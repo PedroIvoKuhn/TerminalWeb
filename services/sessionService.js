@@ -1,11 +1,11 @@
 const k8sService = require('./k8sService');
 
 // Configurações de Tempo (em milissegundos)
-
+/*
 const INITIAL_DURATION = 60 * 1000;             // 1 minuto
 const WARNING_BEFORE = 55 * 1000;               // 55 Segundos antes de acabar
 // */
-/*
+
 const INITIAL_DURATION = 2 * 60 * 60 * 1000;  // 2 Horas
 const WARNING_BEFORE = 20 * 60 * 1000;        // 20 Minutos antes de acabar
 // */

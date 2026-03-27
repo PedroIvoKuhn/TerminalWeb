@@ -34,14 +34,14 @@ module.exports = (io) => {
                     machineAliases.push(`worker-${i}`);
                 }
 
+                await connectTerminal(socket, jobId, masterPodName);
+                
                 socket.emit('session-ready', { 
                     aliases: machineAliases,
-                    jobId: jobId });
-
+                    jobId: jobId 
+                });
                 socket.emit('output', `\r\n✅ Conectado! Apelidos SSH configurados.\r\n`);
                 socket.emit('output', `Tente: ssh worker-1 \r\n\r\n`);
-
-                await connectTerminal(socket, jobId, masterPodName);
             } catch (err) {
                 await handlePodError(err, socket, jobId, secretName);
             }
@@ -75,6 +75,8 @@ module.exports = (io) => {
                     machineAliases.push(`worker-${i}`);
                 }
 
+                await connectTerminal(socket, jobId, podName);
+                
                 socket.emit('session-ready', { 
                     aliases: machineAliases,
                     jobId: jobId 
@@ -84,8 +86,6 @@ module.exports = (io) => {
                   socket.emit('output', `\r\n[ERRO] A máquina '${requestedMachine}' não existe neste cluster. Se você deseja mais máquinas crie uma nova sessão.\r\n`);
                   return; 
                 }
-
-                await connectTerminal(socket, jobId, podName);
             } catch (err) {
                 await handlePodError(err, socket, jobId, secretName);
             }
@@ -154,10 +154,19 @@ function handleTerminalClose(socket) {
 function setupTerminalInput(socket, execWs) {
     // evita enviar uma letra duas vezes se for chamado novamente
     socket.removeAllListeners('input');
+    socket.removeAllListeners('resize');
+
     socket.on('input', (data) => { 
         if (execWs && execWs.readyState === 1) { 
             execWs.send(Buffer.from('\x00' + data)); 
         } 
+    });
+
+    socket.on('resize', ({ cols, rows }) => {
+        if (execWs && execWs.readyState === 1) {
+            const resizeMsg = JSON.stringify({ Width: cols, Height: rows });
+            execWs.send(Buffer.from('\x04' + resizeMsg));
+        }
     });
 }
 

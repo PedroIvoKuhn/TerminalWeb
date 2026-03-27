@@ -25,6 +25,11 @@ function initializeTerminal() {
     terminalContainer.style.display = 'block';
 
     term.open(document.getElementById('terminal'));
+
+    term.onResize((size) => {
+        socket.emit('resize', { cols: size.cols, rows: size.rows });
+    });
+
     fitAddon.fit();
     window.addEventListener('resize', () => fitAddon.fit());
 }
@@ -72,6 +77,11 @@ socket.on('session-ready', (data) => {
 
         machineList.appendChild(btn);
     });
+    setTimeout(() => {
+        console.log("Terminal sincronizando dimensões:", term.cols, term.rows);
+        fitAddon.fit();
+        socket.emit('resize', { cols: term.cols, rows: term.rows });
+    }, 500);
 });
 
 socket.on('connect_error', (err) => {
