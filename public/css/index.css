@@ -1,0 +1,175 @@
+#timer-bar {
+    display: none; 
+    align-items: center;
+    gap: 15px;
+    font-weight: bold;
+    padding: 4px;
+    border-radius: 8px;
+}
+
+/* Estilo do botão de matar a sessão */
+.btn-danger {
+    background-color: #c0392b;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.btn-danger:hover {
+    background-color: #e74c3c;
+}
+
+.btn-extend-24h {
+    background-color: #3498db;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.btn-extend-24h:hover {
+    background-color: #34acdb;
+}
+
+.btn-extend-24h:disabled {
+    background-color: gray;
+    cursor: not-allowed;
+}
+
+#terminal-container {
+    display: none;
+}
+
+#terminal {
+    width: 100%;
+    height: 80vh;
+}
+
+#setup-container {
+    padding: 30px;
+    background-color: #1e1e1e;
+    border-radius: 8px;
+    text-align: center;
+}
+
+input {
+    padding: 10px;
+    margin-right: 10px;
+}
+
+button {
+    padding: 10px 20px;
+    cursor: pointer;
+}
+
+/* --- NOVO ESTILO PARA A LISTA --- */
+#machine-list {
+    list-style: none;
+    padding: 0;
+}
+
+#machine-list li {
+    background-color: #3c3c3c;
+    margin: 5px 0;
+    padding: 8px;
+    border-radius: 4px;
+}
+
+/* Ajuste para o terminal não ficar embaixo da barra */
+#terminal-container {
+    margin-top: 50px;
+}
+
+/* Cor de alerta para quando estiver acabando */
+.timer-critical {
+    background-color: #c0392b !important;
+    animation: pulse 1s infinite;
+    padding: 4px 12px;
+    border-radius: 4px;
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.7;
+    }
+
+    100% {
+        opacity: 1;
+    }
+}
+
+#session-modal, #expired-modal {
+    display: none; 
+    position: fixed; 
+    top: 0; 
+    left: 0; 
+    width: 100%; 
+    height: 100%; 
+    background: rgba(0,0,0,0.8); 
+    z-index: 1000; 
+    justify-content: center; 
+    align-items: center;
+}
+
+.session-content, .expired-content{
+    background: #333;
+    padding: 30px; 
+    border-radius: 8px; 
+    text-align: center; 
+    border: 2px solid #f39c12; 
+    max-width: 400px; 
+    color: white;
+}
+
+.session-content h2,
+.expired-content h2 {
+    color: #f39c12;
+}
+
+.session-content:last-child {
+    margin-top: 20px;
+}
+
+#btn-extend {
+    background: #27ae60; 
+    color: white; 
+    padding: 10px 20px; 
+    border: none; 
+    cursor: pointer; 
+    border-radius: 4px; 
+    margin-right: 10px; 
+    font-size: 1rem;
+}
+
+#btn-ignore {
+    background: #e74c3c; 
+    color: white; 
+    padding: 10px 20px; 
+    margin-top: 10px;
+    border: none; 
+    cursor: pointer; 
+    border-radius: 4px; 
+    font-size: 1rem;
+}
+
+#btn-reload {
+    background: #3498db; 
+    color: white; 
+    padding: 10px 20px; 
+    border: none; 
+    cursor: pointer; 
+    border-radius: 4px; 
+    margin-top: 20px; 
+    font-size: 1rem;
+}

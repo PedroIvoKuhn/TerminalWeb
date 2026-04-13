@@ -4,14 +4,14 @@ const lti = require('ltijs').Provider;
 
 // Função privada
 
-function renderTemplate(res, userName, mpiImage) {
+function renderTemplate(res, userName, image) {
     const templatePath = path.join(__dirname, '../views', 'index.html');
 
     fs.readFile(templatePath, 'utf8', (err, html) => {
         if (err) return res.status(500).send("Erro ao carregar index.html.");
 
         let finalHtml = html.replace('{{NOME_USUARIO}}', userName);
-        finalHtml = finalHtml.replaceAll('{{MPI_IMAGE}}', mpiImage);
+        finalHtml = finalHtml.replaceAll('{{IMAGE}}', image);
         res.send(finalHtml);
     });
 }
@@ -22,11 +22,21 @@ async function setup(app) {
     if (process.env.NODE_ENV === "development"){
         app.get('/', (req, res) => {
             const userName = "userDev";
-            const mpiImage = process.env.DEFAULT_MPI_IMAGE;
-            renderTemplate(res, userName, mpiImage);
+            const image = process.env.DEFAULT_MPI_IMAGE;
+            renderTemplate(res, userName, image);
+        });
+        
+        app.get('/documentation', (req, res) => {
+            const documentationPath = path.join(__dirname, '../views', 'documentation.html');
+            res.sendFile(documentationPath);
         });
         return;
     }
+
+    /*app.get('/', (req, res) => {
+        const unauthorizedPath = path.join(__dirname, '../views', 'unauthorized.html');
+        res.sendFile(unauthorizedPath);
+    });*/
 
     // Inicia o LTI
     await lti.setup(process.env.LTI_ENCRYPTION_KEY,
@@ -66,7 +76,7 @@ async function setup(app) {
     lti.onConnect(async (token, req, res) => {
         console.log('Usuário conectado:', token.userInfo.name , " ID:", token.user);
         const userName = token.userInfo.name || 'Usuário Desconhecido';
-        let mpiImage = process.env.DEFAULT_MPI_IMAGE;
+        let image = process.env.DEFAULT_MPI_IMAGE;
 
         //ID para o MiniO
         req.session.userId = token.user;
@@ -74,9 +84,9 @@ async function setup(app) {
 
         const custImagem = token.platformContext.custom ? token.platformContext.custom.imagem : undefined;
         if (custImagem && custImagem.toLowerCase() !== 'default') {
-            mpiImage = custImagem;
+            image = custImagem;
         }
-        renderTemplate(res, userName, mpiImage);
+        renderTemplate(res, userName, image);
     });
 }
 

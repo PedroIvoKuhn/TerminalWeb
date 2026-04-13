@@ -22,10 +22,9 @@ function generateSshConfig(numMachines, jobId, masterPodName, serviceName) {
     let sshConfig = '';
     for (let i = 0; i < numMachines; i++) {
         const isMaster = i === 0;
-        const podName = isMaster ? masterPodName : `worker-${i}-${jobId}`;
         const alias = isMaster ? 'master' : `worker-${i}`;
-        const fqdn = `${podName}.${serviceName}.${namespace}.svc.cluster.local`;
-        sshConfig += `Host ${alias}\n    HostName ${fqdn}\n    User mpiuser\n\n`;
+        const fqdn = `${alias}.${serviceName}.${namespace}.svc.cluster.local`;
+        sshConfig += `Host ${alias}\n    HostName ${fqdn}\n    User user\n\n`;
     }
     sshConfig += `Host *\n    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null\n`;
     return sshConfig;
@@ -82,7 +81,7 @@ async function waitForPodRunning(name) {
     });
 }
 
-async function createClusterResources(jobId, numMachines, mpiImage, keys) {
+async function createClusterResources(jobId, numMachines, image, keys, expiresAt, numMachines) {
     const masterPodName = `master-${jobId}`;
     const serviceName = `svc-${jobId}`;
     const secretName = `ssh-keys-${jobId}`;
@@ -97,7 +96,7 @@ async function createClusterResources(jobId, numMachines, mpiImage, keys) {
     }
 
     // Cria o secret
-    const sshConfig = generateSshConfig(numMachines, jobId, masterPodName, secretName);
+    const sshConfig = generateSshConfig(numMachines, jobId, masterPodName, serviceName);
     const secretManifest = getSecretManifest(secretName, keys.privateKey, keys.publicKey, sshConfig);
     await k8sApi.createNamespacedSecret(namespace, secretManifest);
 
@@ -106,49 +105,54 @@ async function createClusterResources(jobId, numMachines, mpiImage, keys) {
         apiVersion: 'v1',
         kind: 'Service',
         metadata: { name: serviceName },
-        spec: { clusterIP: 'None', selector: { 'mpi-job-id': jobId } }
+        spec: { clusterIP: 'None', selector: { 'job-id': jobId } }
     };
     await k8sApi.createNamespacedService(namespace, serviceManifest);
 
     // Criar os Pods
     const podPromises = [];
     for (let i = 0; i < numMachines; i++) {
-        const podName = i === 0 ? masterPodName : `worker-${i}-${jobId}`;
+        const podK8sName = i === 0 ? masterPodName : `worker-${i}-${jobId}`;
+        const networkHostname = i === 0 ? 'master' : `worker-${i}`;
         const podManifest = {
             metadata: {
-                name: podName,
-                labels: { 'mpi-job-id': jobId, 'mpi-role': i === 0 ? 'master' : 'worker' }
+                name: podK8sName,
+                labels: { 'job-id': jobId, 'role': i === 0 ? 'master' : 'worker' },
+                annotations: {
+                  'terminalWeb/expiresAt': expiresAt.toString(),
+                  'terminalWeb/numMachines': numMachines.toString()
+                }
             },
             spec: {
                 securityContext: {
                     fsGroup: 1000
                 },
-                hostname: podName,
+                hostname: networkHostname,
                 subdomain: serviceName,
                 serviceAccountName: 'terminal-backend-sa',
                 containers: [{
-                    name: 'mpi-container',
-                    image: mpiImage,
+                    name: 'container',
+                    image: image,
                     imagePullPolicy: 'IfNotPresent',
                     volumeMounts: [
                         {
                             name: 'ssh-keys-volume',
-                            mountPath: '/home/mpiuser/.ssh/id_rsa',
+                            mountPath: '/home/user/.ssh/id_rsa',
                             subPath: 'id_rsa'
                         },
                         {
                             name: 'ssh-keys-volume',
-                            mountPath: '/home/mpiuser/.ssh/id_rsa.pub',
+                            mountPath: '/home/user/.ssh/id_rsa.pub',
                             subPath: 'id_rsa.pub'
                         },
                         {
                             name: 'ssh-keys-volume',
-                            mountPath: '/home/mpiuser/.ssh/authorized_keys',
+                            mountPath: '/home/user/.ssh/authorized_keys',
                             subPath: 'authorized_keys'
                         },
                         {
                             name: 'ssh-keys-volume',
-                            mountPath: '/home/mpiuser/.ssh/config',
+                            mountPath: '/home/user/.ssh/config',
                             subPath: 'config'
                         }
                     ]
@@ -177,7 +181,7 @@ async function cleanupJob(jobId, secretName) {
             //console.log(`Deletando Secret: ${secretName}`);
             await k8sApi.deleteNamespacedSecret(secretName, namespace);
         }
-        //console.log(`Deletando pods com label mpi-job-id=${jobId}`);
+        //console.log(`Deletando pods com label job-id=${jobId}`);
         await k8sApi.deleteCollectionNamespacedPod(
             namespace, 
             undefined,                      // pretty
@@ -185,7 +189,7 @@ async function cleanupJob(jobId, secretName) {
             undefined,                      // dryRun
             undefined,               // fieldSelector
             undefined,          // gracePeriodSeconds
-            `mpi-job-id=${jobId}`    // labelSelector
+            `job-id=${jobId}`    // labelSelector
         );
         //console.log(`Deletando service svc-${jobId}`);
         await k8sApi.deleteNamespacedService(`svc-${jobId}`, namespace);
@@ -197,4 +201,72 @@ async function cleanupJob(jobId, secretName) {
     }
 }
 
-module.exports = { waitForPodRunning, cleanupJob, createClusterResources };
+async function getActiveJobs() {
+  try {
+    const response = await k8sApi.listNamespacedPod(
+      namespace,
+      undefined, // 2. pretty
+      undefined, // 3. allowWatchBookmarks
+      undefined, // 4. _continue
+      undefined, // 5. fieldSelector
+      `role=master` // 6. labelSelector
+    );
+
+    const pods = response.body.items;
+    const activeSessionsData = [];
+
+    for (const pod of pods) {
+      const labels = pod.metadata.labels || {};
+      const annotations = pod.metadata.annotations || {};
+
+      const jobId = labels["job-id"];
+      const expiresAtStr = annotations["terminalWeb/expiresAt"];
+      const numMachinesStr =  annotations["terminalWeb/numMachines"];
+
+      if (jobId && expiresAtStr) {
+        activeSessionsData.push({
+          jobId: jobId,
+          expiresAt: parseInt(expiresAtStr, 10),
+          numMachines: parseInt(numMachinesStr, 10) || 2
+        })
+      }
+    }
+    
+    return activeSessionsData;
+  } catch (error) {
+    console.error("Erro ao buscar sessões ativas no K8s:", error);
+    return [];
+  }
+}
+
+async function updateJobExpiration(jobId, newExpiresAt) {
+    try {
+        const podName = `master-${jobId}`;
+        
+        const patch = {
+            metadata: {
+                annotations: {
+                    'terminalWeb/expiresAt': newExpiresAt.toString()
+                }
+            }
+        };
+
+        const options = { 
+            headers: { 'Content-Type': 'application/strategic-merge-patch+json' } 
+        };
+
+        await k8sApi.patchNamespacedPod(
+            podName, 
+            namespace, 
+            patch, 
+            undefined, undefined, undefined, undefined, undefined, 
+            options
+        );
+        
+        console.log(`[K8s] Annotation atualizada com sucesso para o Job ${jobId}`);
+    } catch (err) {
+        console.error(`[ERRO K8s] Falha ao atualizar a expiração do Job ${jobId}:`, err);
+    }
+}
+
+module.exports = { waitForPodRunning, cleanupJob, createClusterResources, getActiveJobs, updateJobExpiration};
