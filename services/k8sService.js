@@ -81,7 +81,8 @@ async function waitForPodRunning(name) {
     });
 }
 
-async function createClusterResources(jobId, numMachines, image, keys, expiresAt, numMachines) {
+async function createClusterResources(clusterInfo) {
+    const { jobId, image, keys, expiresAt, numMachines, userId, activeBackupName } = clusterInfo;
     const masterPodName = `master-${jobId}`;
     const serviceName = `svc-${jobId}`;
     const secretName = `ssh-keys-${jobId}`;
@@ -120,7 +121,9 @@ async function createClusterResources(jobId, numMachines, image, keys, expiresAt
                 labels: { 'job-id': jobId, 'role': i === 0 ? 'master' : 'worker' },
                 annotations: {
                   'terminalWeb/expiresAt': expiresAt.toString(),
-                  'terminalWeb/numMachines': numMachines.toString()
+                  'terminalWeb/numMachines': numMachines.toString(),
+                  'terminalWeb/userId': userId.toString(),
+                  'terminalWeb/activeBackupName': activeBackupName.toString(),
                 }
             },
             spec: {
@@ -222,12 +225,16 @@ async function getActiveJobs() {
       const jobId = labels["job-id"];
       const expiresAtStr = annotations["terminalWeb/expiresAt"];
       const numMachinesStr =  annotations["terminalWeb/numMachines"];
+      const userId = annotations["terminalWeb/userId"];
+      const activeBackupName = annotations["terminalWeb/activeBackupName"];
 
       if (jobId && expiresAtStr) {
         activeSessionsData.push({
           jobId: jobId,
           expiresAt: parseInt(expiresAtStr, 10),
-          numMachines: parseInt(numMachinesStr, 10) || 2
+          numMachines: parseInt(numMachinesStr, 10) || 2,
+          userId: userId,
+          activeBackupName: activeBackupName,
         })
       }
     }

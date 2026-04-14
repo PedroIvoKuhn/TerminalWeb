@@ -38,11 +38,20 @@ module.exports = (io) => {
                 socket.emit('output', 'Gerando chaves e configuração SSH...\r\n');
                 const keys = await sshService.generateSSHKeys();
 
-                const expiresAt = sessionService.startSession(jobId, socket, numMachines);
+                const expiresAt = sessionService.startSession(jobId, socket, numMachines, currentUserId, backupName);
                 socket.emit('session:update', { expiresAt: expiresAt });
 
                 // Criar a infraestrutura
-                const { masterPodName } = await k8sService.createClusterResources(jobId, numMachines, image, keys, expiresAt, numMachines);
+                const clusterInfo = {
+                    jobId, 
+                    numMachines, 
+                    image, 
+                    keys, 
+                    expiresAt,
+                    userId: currentUserId,
+                    activeBackupName: backupName,
+                };
+                const { masterPodName } = await k8sService.createClusterResources(clusterInfo);
                 socket.emit('output', `Pods criados. Aguardando o nó mestre ficar pronto...\r\n`);
 
                 await k8sService.waitForPodRunning(masterPodName);
@@ -134,22 +143,8 @@ module.exports = (io) => {
         });
 
         socket.on("disconnect", async () => {
-            const { jobId, userId, activeBackupName } = socket.data;
-            const masterPodName = `master-${jobId}`;
+            const { jobId } = socket.data;
             if (!jobId) return;
-// Não pode salvar aqui! Tem que ir para o sessionService
-// Além que esse evento é quando saimos do terminal, não quando termina a sessão
-            if (userId && activeBackupName && masterPodName) {
-                console.log(`[Auto-Save] Salvando automaticamente em: ${activeBackupName}`);
-
-                try {
-                    // Tenta salvar antes de destruir
-                    await minioService.salvarBackup(userId, masterPodName, activeBackupName);
-                    console.log(`[Auto-Save] Sucesso!`);
-                } catch (err) {
-                    console.error(`[Auto-Save] Falha ao salvar no encerramento:`, err.message);
-                }
-            }
 
             sessionService.removeSocket(jobId, socket);
         });
