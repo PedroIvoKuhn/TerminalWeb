@@ -16,9 +16,15 @@ module.exports = (io) => {
         console.log(`[Socket] Conectado. UserID da Sessão: ${userId}`);
         socket.data.userId = userId;
         socket.data.activeBackupName = null;
+
         socket.on('start-session', async (data) => {
             let { numMachines, image, backupName } = data;
+            const jobId = `job-${socket.id.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+            const secretName = `ssh-keys-${jobId}`;
             const currentUserId = socket.data.userId;
+
+            socket.data.jobId = jobId;
+            socket.data.activeBackupName = backupName || null;
 
             if (!currentUserId) {
                 console.log("[Socket] Bloqueio: Usuário não identificado.");
@@ -26,21 +32,12 @@ module.exports = (io) => {
                 return;
             }
 
-            const jobId = `job-${socket.id.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
-            const secretName = `ssh-keys-${jobId}`;
-            // Guardamos os dados importantes na memória do socket
-            socket.data.jobId = jobId;
-            // Se ele começou com um arquivo, esse é o ativo. Se começou do zero, é null.
-            socket.data.activeBackupName = backupName || null;
-
             socket.emit('output', `\r\nIniciando ${numMachines} nós usando a imagem ${image}...\r\n`);
             
             try {
-                // Gerar Chaves
                 socket.emit('output', 'Gerando chaves e configuração SSH...\r\n');
                 const keys = await sshService.generateSSHKeys();
-              
-                // Iniciar contador
+
                 const expiresAt = sessionService.startSession(jobId, socket, numMachines);
                 socket.emit('session:update', { expiresAt: expiresAt });
 
@@ -48,13 +45,11 @@ module.exports = (io) => {
                 const { masterPodName } = await k8sService.createClusterResources(jobId, numMachines, image, keys, expiresAt, numMachines);
                 socket.emit('output', `Pods criados. Aguardando o nó mestre ficar pronto...\r\n`);
 
-                // Esperar ficar pronto
                 await k8sService.waitForPodRunning(masterPodName);
 
                 if (backupName) {
                     socket.emit('output', `📦 Restaurando backup: "${backupName}"... `);
                     try {
-                        // Chama aquela função de restaurar que criamos antes
                         await minioService.restaurarBackup(userId, masterPodName, backupName);
                         socket.emit('output', `[OK]\r\n`);
                     } catch (restoreErr) {
@@ -72,26 +67,14 @@ module.exports = (io) => {
                 
                 socket.emit('session-ready', { 
                     aliases: machineAliases,
-                    jobId: jobId 
+                    jobId: jobId,
+                    masterPodName: masterPodName 
                 });
                 socket.emit('output', `\r\n✅ Conectado! Apelidos SSH configurados.\r\n`);
                 socket.emit('output', `Tente: ssh worker-1 \r\n\r\n`);
             } catch (err) {
                 await handlePodError(err, socket, jobId, secretName);
             }
-        });
-
-        socket.on('session:extend-response', async () => {
-          await sessionService.extendSession(socket.data.jobId, 1000 * 60 * 60);
-        });
-
-        socket.on('update-active-backup', (novoNome) => {
-            console.log(`[Socket] Backup ativo atualizado para: ${novoNome}`);
-            socket.data.activeBackupName = novoNome;
-        });
-
-        socket.on('session:extend-24h', async () => {
-          await sessionService.extendSession(socket.data.jobId, 1000 * 60 * 60 * 24);
         });
 
         socket.on('restore-session', async ({ jobId, machine }) => {
@@ -130,6 +113,19 @@ module.exports = (io) => {
             }
         });
 
+        socket.on('session:extend-response', async () => {
+          await sessionService.extendSession(socket.data.jobId, 1000 * 60 * 60);
+        });
+
+        socket.on('session:extend-24h', async () => {
+          await sessionService.extendSession(socket.data.jobId, 1000 * 60 * 60 * 24);
+        });
+
+        socket.on('update-active-backup', (novoNome) => {
+            console.log(`[Socket] Backup ativo atualizado para: ${novoNome}`);
+            socket.data.activeBackupName = novoNome;
+        });
+
         socket.on("kill-session", async () => {
             const jobId = socket.data.jobId;
             if (!jobId) return;
@@ -141,17 +137,19 @@ module.exports = (io) => {
             const { jobId, userId, activeBackupName } = socket.data;
             const masterPodName = `master-${jobId}`;
             if (!jobId) return;
-
+// Não pode salvar aqui! Tem que ir para o sessionService
+// Além que esse evento é quando saimos do terminal, não quando termina a sessão
             if (userId && activeBackupName && masterPodName) {
-                    console.log(`[Auto-Save] Salvando automaticamente em: ${activeBackupName}`);
-                    try {
-                        // Tenta salvar antes de destruir
-                        await minioService.salvarBackup(userId, masterPodName, activeBackupName);
-                        console.log(`[Auto-Save] Sucesso!`);
-                    } catch (err) {
-                        console.error(`[Auto-Save] Falha ao salvar no encerramento:`, err.message);
-                    }
+                console.log(`[Auto-Save] Salvando automaticamente em: ${activeBackupName}`);
+
+                try {
+                    // Tenta salvar antes de destruir
+                    await minioService.salvarBackup(userId, masterPodName, activeBackupName);
+                    console.log(`[Auto-Save] Sucesso!`);
+                } catch (err) {
+                    console.error(`[Auto-Save] Falha ao salvar no encerramento:`, err.message);
                 }
+            }
 
             sessionService.removeSocket(jobId, socket);
         });

@@ -284,51 +284,6 @@ setupForm.addEventListener('submit', (e) => {
 term.onData(data => socket.emit('input', data));
 socket.on('output', data => term.write(data));
 
-socket.on('session-ready', (data) => {
-    const machineList = document.getElementById('machine-list');
-    machineList.innerHTML = '';
-    localStorage.setItem("jobId", data.jobId);
-
-    data.aliases.forEach(alias => {
-        const btn = document.createElement('button');
-        btn.textContent = `${alias}`;
-        btn.className = 'btn-machine';
-
-        if (alias === targetMachine) {
-          btn.disabled = true;
-        }
-
-        btn.onclick = () => {
-          // Pega a URL atual, limpa parâmetros velhos e adiciona o target novo
-          const novaUrl = `${window.location.pathname}?machine=${alias}`;
-          window.open(novaUrl, '_blank');
-        };
-
-        machineList.appendChild(btn);
-    });
-
-    if (data.masterPodName) {
-        console.log("Pod Mestre identificado:", data.masterPodName);
-        myMasterPodName = data.masterPodName;
-        
-        const backupUi = document.getElementById('backup-ui');
-        if(backupUi) {
-            backupUi.style.display = 'block';
-            atualizarInterfaceBackup();
-            carregarBackups();
-        }
-    }
-    setTimeout(() => {
-        console.log("Terminal sincronizando dimensões:", term.cols, term.rows);
-        fitAddon.fit();
-        socket.emit('resize', { cols: term.cols, rows: term.rows });
-    }, 500);
-});
-
-socket.on('connect_error', (err) => {
-    term.write(`\r\n[ERRO DE CONEXÃO]: ${err.message}`);
-});
-
 // --- SALVAR ---
 window.salvarArquivo = async function(nomeAlvo) {
     if(!myMasterPodName) return alert('Erro: Pod não conectado.');
@@ -410,6 +365,8 @@ window.deletar = async (nome) => {
         alert('Erro ao tentar apagar.');
     }
 };
+
+// --- Funções do contador ---
 let countdownInterval;
 const timerBar = document.getElementById('timer-bar');
 const countdownDisplay = document.getElementById('countdown-display');
@@ -425,7 +382,6 @@ function formatTime(ms) {
 }
 
 function startCountdown(expiresAt) {
-    // Mostra a barra
     timerBar.style.display = 'flex';
     timerBar.classList.remove('timer-critical'); // Remove alerta vermelho se houver
 
@@ -469,7 +425,53 @@ function startCountdown(expiresAt) {
 }
 
 // --- EVENTOS SOCKET ---
+socket.on('session-ready', (data) => {
+    const machineList = document.getElementById('machine-list');
+    machineList.innerHTML = '';
+    localStorage.setItem("jobId", data.jobId);
 
+    data.aliases.forEach(alias => {
+        const btn = document.createElement('button');
+        btn.textContent = `${alias}`;
+        btn.className = 'btn-machine';
+
+        if (alias === targetMachine) {
+          btn.disabled = true;
+        }
+
+        btn.onclick = () => {
+          // Pega a URL atual, limpa parâmetros velhos e adiciona o target novo
+          const novaUrl = `${window.location.pathname}?machine=${alias}`;
+          window.open(novaUrl, '_blank');
+        };
+
+        machineList.appendChild(btn);
+    });
+
+    if (data.masterPodName) {
+        console.log("Pod Mestre identificado:", data.masterPodName);
+        myMasterPodName = data.masterPodName;
+        
+        const backupUi = document.getElementById('backup-ui');
+        if(backupUi) {
+            backupUi.style.display = 'block';
+            atualizarInterfaceBackup();
+            carregarBackups();
+        }
+    }
+
+    setTimeout(() => {
+        console.log("Terminal sincronizando dimensões:", term.cols, term.rows);
+        fitAddon.fit();
+        socket.emit('resize', { cols: term.cols, rows: term.rows });
+    }, 500);
+});
+
+socket.on('connect_error', (err) => {
+    term.write(`\r\n[ERRO DE CONEXÃO]: ${err.message}`);
+});
+
+// SESSION SOCKETS
 socket.on('session:update', (data) => {
     startCountdown(data.expiresAt);
     setTimeout(() => {
@@ -496,7 +498,6 @@ socket.on('session:expired', () => {
 });
 
 // --- BOTÕES ---
-
 document.getElementById('btn-extend').addEventListener('click', (e) => {
     e.target.disabled = true;
     document.getElementById('btn-ignore').disabled = true;

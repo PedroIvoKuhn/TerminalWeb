@@ -18,7 +18,7 @@
         #machine-info,
         #backup-ui { width: 50%; box-sizing: border-box;}
     </style>
-    <title>Web Terminal</title>
+    <title>Terminal Web</title>
     <meta name="image" content="{{IMAGE}}">
     <link rel="stylesheet" href="/xterm/css/xterm.css" />
     <link rel="stylesheet" href="/css/global.css"/> 
@@ -44,7 +44,6 @@
     <h1>Cluster via Web Terminal - Bem-vindo, {{NOME_USUARIO}}!</h1>
 
     <div id="setup-container">
-        <h1>Cluster via Web Terminal - Bem-vindo, {{NOME_USUARIO}}!</h1>
         <h2>Configuração do Cluster</h2>
         <p>Você está usando a imagem: {{IMAGE}}</p>
         <p>Cada sessão tem um tempo máximo de 2 horas</p>
@@ -98,11 +97,6 @@
                     </button>
                 </div>
             </div>
-        <div id="machine-info">
-            <h3>Máquinas Disponíveis:</h3>
-            <ul id="machine-list">
-            </ul>
-        </div>
         <hr>
         <div id="terminal"></div>
     </div>
