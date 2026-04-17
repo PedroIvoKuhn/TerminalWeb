@@ -1,5 +1,5 @@
 const k8s = require('@kubernetes/client-node');
-const { k8sApi, namespace, kc } = require('../config/kubernetes');
+const { k8sApi, namespace, kc, k8sExec } = require('../config/kubernetes');
 
 // --  Funções privadas
 
@@ -276,4 +276,24 @@ async function updateJobExpiration(jobId, newExpiresAt) {
     }
 }
 
-module.exports = { waitForPodRunning, cleanupJob, createClusterResources, getActiveJobs, updateJobExpiration};
+async function connectPodToTerminal(masterPodName) {
+    const command = ['/bin/bash'];
+    return await k8sExec.exec(
+        namespace, 
+        masterPodName, 
+        'container', 
+        command, 
+        process.stdout, 
+        process.stderr, 
+        process.stdin, 
+        true);
+}
+
+module.exports = { 
+    waitForPodRunning, 
+    cleanupJob, 
+    createClusterResources, 
+    getActiveJobs, 
+    updateJobExpiration,
+    connectPodToTerminal,
+};

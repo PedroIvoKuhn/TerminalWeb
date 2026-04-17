@@ -1,4 +1,3 @@
-const { k8sExec, namespace } = require('../config/kubernetes');
 const k8sService = require('./k8sService');
 const sshService = require('./sshService');
 const minioService = require('./minioService');
@@ -143,7 +142,17 @@ module.exports = (io) => {
         });
 
         socket.on("disconnect", async () => {
-            const { jobId } = socket.data;
+            const { jobId, execWs } = socket.data;
+
+            if (execWs) {
+                try {
+                    execWs.close();
+                } catch (error) {
+                    execWs.terminate();
+                }
+                console.log(`[Socket] Conexão K8s-Exec fechada junto com o socket`);
+            }
+
             if (!jobId) return;
 
             sessionService.removeSocket(jobId, socket);
@@ -152,22 +161,12 @@ module.exports = (io) => {
 };
 
 async function connectTerminal(socket, jobId, masterPodName) {
-    const command = ['/bin/bash'];
-    const execWs = await k8sExec.exec(
-        namespace, 
-        masterPodName, 
-        'container', 
-        command, 
-        process.stdout, 
-        process.stderr, 
-        process.stdin, 
-        true);
+    const execWs = await k8sService.connectPodToTerminal(masterPodName);
+    socket.data.execWs = execWs;
 
     setupTerminalInput(socket, execWs);
     execWs.onmessage = (event) => handleTerminalOutput(event, socket, jobId);
     execWs.onclose = () => handleTerminalClose(socket);
-
-    return execWs;
 }
 
 function handleTerminalOutput(event, socket, jobId) {

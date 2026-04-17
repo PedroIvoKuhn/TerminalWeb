@@ -1,3 +1,10 @@
+body {
+    background-color: #2d2d2d; 
+    color: #f1f1f1; 
+    padding: 20px; 
+    font-family: sans-serif;
+}
+
 #timer-bar {
     display: none; 
     align-items: center;
@@ -7,7 +14,6 @@
     border-radius: 8px;
 }
 
-/* Estilo do botão de matar a sessão */
 .btn-danger {
     background-color: #c0392b;
     color: white;
@@ -45,6 +51,7 @@
 
 #terminal-container {
     display: none;
+    margin-top: 50px;
 }
 
 #terminal {
@@ -71,23 +78,39 @@ button {
 
 /* --- NOVO ESTILO PARA A LISTA --- */
 #machine-list {
-    list-style: none;
-    padding: 0;
+    list-style: none; 
+    padding: 0; 
+    margin: 10px 0 0 0; 
+    display: flex; 
+    flex-wrap: wrap; 
+    gap: 10px;
 }
 
 #machine-list li {
-    background-color: #3c3c3c;
-    margin: 5px 0;
-    padding: 8px;
-    border-radius: 4px;
+    width: 90px; 
+    height: 60px; 
+    background: #2d2d2d;     
+    border: 1px solid #444;  
+    border-radius: 6px; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    color: white; 
+    font-size: 0.85em;
 }
 
-/* Ajuste para o terminal não ficar embaixo da barra */
-#terminal-container {
-    margin-top: 50px;
+#container-principal {
+    display: flex; 
+    width: 100%; 
+    height: 100%; 
+    gap: 10px;
 }
 
-/* Cor de alerta para quando estiver acabando */
+#machine-info, #backup-ui { 
+    width: 50%; 
+    box-sizing: border-box;
+}
+
 .timer-critical {
     background-color: #c0392b !important;
     animation: pulse 1s infinite;
@@ -172,4 +195,104 @@ button {
     border-radius: 4px; 
     margin-top: 20px; 
     font-size: 1rem;
+}
+
+#btn-salvar-novo {
+    background: #28a745; 
+    color: white; 
+    border: none; 
+    padding: 8px 15px; 
+    cursor: pointer; 
+    border-radius: 4px; 
+    font-weight: bold;
+}
+
+#nome-backup {
+    flex:1;
+    padding: 8px; 
+    border-radius: 4px; 
+    border: 1px solid #555; 
+    background: #222; 
+    color: white;
+}
+
+.input-backup {
+    display: flex; 
+    gap: 10px;
+}
+
+#btn-salvar-atual {
+    background: #17a2b8; 
+    color: white; 
+    border: none; 
+    padding: 6px 15px; 
+    cursor: pointer; 
+    border-radius: 4px; 
+    font-weight: bold;
+}
+
+#area-salvar-atual{
+    display:none; 
+    margin-bottom: 15px; 
+    background: #333; 
+    padding: 10px; 
+    border-radius: 4px; 
+    border-left: 4px solid #17a2b8; 
+    align-items: center; 
+    justify-content: space-between;
+}
+
+#status-cota {
+    color: #aaa; 
+    background: #222; 
+    padding: 5px 10px; 
+    border-radius: 15px; 
+    border: 1px solid #444; 
+    font-size: 0.85em;
+}
+
+#download-list {
+    list-style: none; 
+    padding: 0;
+}
+
+.my-files {
+    font-size: 1rem; 
+    color: #ddd;   
+}
+
+.files {
+    margin-top: 20px; 
+    border-top: 1px solid #444; 
+    padding-top: 10px; 
+    text-align: left;
+}
+
+#select-backup {
+    padding: 10px; 
+    margin-right: 10px;
+}
+
+#machine-info {
+    margin: 15px 0; 
+    background: #2d2d2d; 
+    padding: 15px; 
+    border-radius: 8px; 
+    border: 1px solid #444;
+}
+
+#backup-ui {
+    display:none; 
+    margin: 15px 0; 
+    background: #2d2d2d; 
+    padding: 15px; 
+    border-radius: 8px; 
+    border: 1px solid #444;  
+}
+
+.backup-container {
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    margin-bottom: 15px;  
 }

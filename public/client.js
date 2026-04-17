@@ -103,7 +103,7 @@ async function carregarListaDownloads() {
 }
 
 // --- 2. LÓGICA DA ÁRVORE (Tree View) ---
-window.toggleNavegacao = async (nomeRawBackup, btn) => {
+async function toggleNavegacao(nomeRawBackup, btn) {
     const nomeLimpo = nomeRawBackup.replace('.tar.gz', '');
     const container = document.getElementById(`tree-container-${nomeLimpo}`);
     
