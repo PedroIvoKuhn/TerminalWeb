@@ -115,7 +115,7 @@ async function terminateSession(jobId) {
         if (session.userId && session.activeBackupName && masterPodName) {
           console.log(`[Auto-Save] Salvando automaticamente em: ${session.activeBackupName}`);
           try {
-            await minioService.salvarBackup(session.userId, masterPodName, session.activeBackupName);
+            await minioService.saveBackup(session.userId, masterPodName, session.activeBackupName);
             console.log(`[Auto-Save] Sucesso!`);
           } catch (err) {
             console.error(`[Auto-Save] Falha ao salvar no encerramento:`, err.message);

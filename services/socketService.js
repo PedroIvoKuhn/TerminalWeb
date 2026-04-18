@@ -58,7 +58,7 @@ module.exports = (io) => {
                 if (backupName) {
                     socket.emit('output', `📦 Restaurando backup: "${backupName}"... `);
                     try {
-                        await minioService.restaurarBackup(userId, masterPodName, backupName);
+                        await minioService.restoreBackup(userId, masterPodName, backupName);
                         socket.emit('output', `[OK]\r\n`);
                     } catch (restoreErr) {
                         console.error(restoreErr);
