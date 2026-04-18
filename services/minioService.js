@@ -74,9 +74,7 @@ async function restoreBackup(userId, podName, fileName) {
         const dataStream = await minioClient.getObject(BUCKET_NAME, pathNoBucket);
 
         await k8sService.connectPodToTerminal(
-            namespace, 
-            podName, 
-            'container', 
+            podName,  
             command,
             null, 
             process.stderr, 
@@ -106,6 +104,10 @@ async function saveBackup(userId, podName, fileName) {
     
     const passThrough = new stream.PassThrough();
 
+    passThrough.on('error', (err) => {
+        console.error('[Stream Error] passThrough error na hora de salvar:', err.message);
+    });
+
     const command = [
         'tar', 'czf', '-', 
         '-C', '/home/user', 
@@ -116,13 +118,11 @@ async function saveBackup(userId, podName, fileName) {
 
     try {
         const execPromise = k8sService.connectPodToTerminal(
-            namespace, 
             podName, 
-            'container', 
             command,
             passThrough, 
             process.stderr, 
-            process.stdin, 
+            null, 
             false
         );
         const uploadPromise = minioClient.putObject(BUCKET_NAME, finalName, passThrough);

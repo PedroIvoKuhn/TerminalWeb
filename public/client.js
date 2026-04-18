@@ -92,7 +92,7 @@ async function carregarListaDownloads() {
                 if(!nomeRaw) return;
                 const nomeLimpo = nomeRaw.replace('.tar.gz', '');
                 const tamanho = (arq.size / 1024 / 1024).toFixed(2);
-                const linkDownloadBackup = `/api/download?nomeArquivo=${encodeURIComponent(nomeRaw)}`;
+                const linkDownloadBackup = `/api/download?fileName=${encodeURIComponent(nomeRaw)}`;
 
                 const li = document.createElement('li');
                 li.style.cssText = "background: #333; margin-bottom: 5px; padding: 10px; border-radius: 4px; border: 1px solid #444;";
@@ -150,7 +150,7 @@ async function toggleNavegacao(nomeRawBackup, btn) {
     }
 
     try {
-        const res = await fetch(`/api/backups/content?nomeArquivo=${encodeURIComponent(nomeRawBackup)}`);
+        const res = await fetch(`/api/backups/content?fileName=${encodeURIComponent(nomeRawBackup)}`);
         if (!res.ok) throw new Error("Erro ao carregar");
         const files = await res.json();
         
@@ -199,7 +199,7 @@ function renderizarNivel(todosArquivos, prefixoAtual, nomeBackup) {
     pastas.forEach(nomePasta => {
         const li = document.createElement('li');
         const novoPrefixo = prefixoAtual + nomePasta + '/';
-        const linkZip = `/api/backups/download-folder?nomeBackup=${nomeBackup}&folder=${encodeURIComponent(novoPrefixo)}`;
+        const linkZip = `/api/backups/download-folder?backupName=${nomeBackup}&folder=${encodeURIComponent(novoPrefixo)}`;
 
         li.innerHTML = `
             <div style="padding:3px 0; display:flex; justify-content:space-between; align-items:center;">
@@ -221,7 +221,7 @@ function renderizarNivel(todosArquivos, prefixoAtual, nomeBackup) {
     arquivos.forEach(arq => {
         const li = document.createElement('li');
         li.style.cssText = "padding:3px 0; display:flex; justify-content:space-between; border-bottom:1px dashed #444; align-items:center;";
-        const link = `/api/backups/download-single?nomeBackup=${nomeBackup}&file=${encodeURIComponent(arq.name)}`;
+        const link = `/api/backups/download-single?backupName=${nomeBackup}&file=${encodeURIComponent(arq.name)}`;
         li.innerHTML = `
             <span style="color:#ccc;">📄 ${arq.nomeCurto}</span>
             <a href="${link}" target="_blank">
@@ -300,7 +300,7 @@ window.salvarArquivo = async function(nomeAlvo) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 podName: myMasterPodName, 
-                nomeArquivo: nomeAlvo 
+                fileName: nomeAlvo 
             })
         });
         
@@ -343,7 +343,7 @@ window.deletar = async (nome) => {
         await fetch('/api/backups', {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nomeCompleto: nome })
+            body: JSON.stringify({ fullName: nome })
         });
         
         const nomeLimpo = nome.split('/')[1].replace('.tar.gz', '');
