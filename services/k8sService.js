@@ -276,17 +276,24 @@ async function updateJobExpiration(jobId, newExpiresAt) {
     }
 }
 
-async function connectPodToTerminal(masterPodName) {
-    const command = ['/bin/bash'];
+async function connectPodToTerminal(
+    masterPodName, 
+    command = ['/bin/bash'], 
+    stdoutStream = process.stdout, 
+    stderrStream = process.stderr, 
+    stdinStream = process.stdin, 
+    isTty = true
+) {
     return await k8sExec.exec(
         namespace, 
         masterPodName, 
         'container', 
         command, 
-        process.stdout, 
-        process.stderr, 
-        process.stdin, 
-        true);
+        stdoutStream, 
+        stderrStream, 
+        stdinStream, 
+        isTty
+    );
 }
 
 module.exports = { 

@@ -1,5 +1,4 @@
 const socket = io();
-
 const urlParams = new URLSearchParams(window.location.search);
 const targetMachine = urlParams.get("machine") || "master";
 
@@ -25,6 +24,35 @@ const term = new Terminal({
 const fitAddon = new FitAddon.FitAddon();
 term.loadAddon(fitAddon);
 
+// --- Inicializando terminal ---
+setupForm.addEventListener('submit', (e) => {
+    e.preventDefault(); 
+    const numMachines = parseInt(numMachinesInput.value, 10);
+    const backupName = selectBackup.value;
+    currentLoadedBackup = backupName || null;
+    const image = document.querySelector('meta[name="image"]').getAttribute('content');
+
+    if (numMachines > 0) {
+        socket.emit('start-session', { numMachines: numMachines, image: image, backupName: backupName });
+        initializeTerminal();
+    }
+});
+
+function initializeTerminal() {
+    setupContainer.style.display = 'none';
+    terminalContainer.style.display = 'block';
+
+    term.open(document.getElementById('terminal'));
+
+    term.onResize((size) => {
+        socket.emit('resize', { cols: size.cols, rows: size.rows });
+    });
+
+    fitAddon.fit();
+    window.addEventListener('resize', () => fitAddon.fit());
+}
+
+// --- MiniO ---
 // --- 1. LISTAGEM DA TELA INICIAL (COM NAVEGAÇÃO) ---
 async function carregarListaDownloads() {
     const listaUl = document.getElementById('download-list');
@@ -208,20 +236,6 @@ function renderizarNivel(todosArquivos, prefixoAtual, nomeBackup) {
 
 carregarListaDownloads();
 
-// --- Lógica de Inicialização ---
-function initializeTerminal() {
-    setupContainer.style.display = 'none';
-    terminalContainer.style.display = 'block';
-
-    term.open(document.getElementById('terminal'));
-
-    term.onResize((size) => {
-        socket.emit('resize', { cols: size.cols, rows: size.rows });
-    });
-
-    fitAddon.fit();
-    window.addEventListener('resize', () => fitAddon.fit());
-}
 
 // --- CONTROLE DA INTERFACE DE BACKUP ---
 function atualizarInterfaceBackup() {
@@ -266,23 +280,6 @@ async function carregarBackups() {
         console.error("Erro cota", e);
     }
 }
-
-// --- EVENTOS ---
-setupForm.addEventListener('submit', (e) => {
-    e.preventDefault(); 
-    const numMachines = parseInt(numMachinesInput.value, 10);
-    const backupName = selectBackup.value;
-    currentLoadedBackup = backupName || null;
-    const image = document.querySelector('meta[name="image"]').getAttribute('content');
-
-    if (numMachines > 0) {
-        socket.emit('start-session', { numMachines: numMachines, image: image, backupName: backupName });
-        initializeTerminal();
-    }
-});
-
-term.onData(data => socket.emit('input', data));
-socket.on('output', data => term.write(data));
 
 // --- SALVAR ---
 window.salvarArquivo = async function(nomeAlvo) {
@@ -423,8 +420,11 @@ function startCountdown(expiresAt) {
         }
     }, 1000);
 }
-
 // --- EVENTOS SOCKET ---
+
+term.onData(data => socket.emit('input', data));
+socket.on('output', data => term.write(data));
+
 socket.on('session-ready', (data) => {
     const machineList = document.getElementById('machine-list');
     machineList.innerHTML = '';

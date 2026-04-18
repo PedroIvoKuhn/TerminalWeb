@@ -1,8 +1,10 @@
 const Minio = require('minio');
-const { k8sExec, namespace } = require('../config/kubernetes');
 const stream = require('stream');
 const tar = require('tar-stream');
 const zlib = require('zlib');
+const path = require('path');
+
+const k8sService = require('./k8sService');
 
 // Configuração do MinIO (pegando do .env)
 const minioClient = new Minio.Client({
@@ -27,45 +29,59 @@ minioClient.bucketExists(BUCKET_NAME, function(err, exists) {
     }
 });
 
-async function listarArquivos(userId) {
-    return new Promise((resolve, reject) => {
-        const objects = [];
-        const dataStream = minioClient.listObjects(BUCKET_NAME, `aluno_${userId}/`, true);
-        dataStream.on('data', obj => objects.push(obj));
-        dataStream.on('error', err => reject(err));
-        dataStream.on('end', () => resolve(objects));
-    });
-}
+async function listFiles(userId) {
+    const objects = [];
+    const dataStream = minioClient.listObjects(BUCKET_NAME, `aluno_${userId}/`, true);
 
-async function verificarCota(userId) {
-    const arquivos = await listarArquivos(userId);
-    const totalUsado = arquivos.reduce((acc, curr) => acc + curr.size, 0);
-    return { totalUsado, permitido: totalUsado < MAX_SIZE_BYTES };
-}
-
-async function deletarArquivo(userId, nomeCompleto) {
-    if (!nomeCompleto.startsWith(`aluno_${userId}/`)) throw new Error("Permissão negada.");
-    await minioClient.removeObject(BUCKET_NAME, nomeCompleto);
-}
-
-async function restaurarBackup(userId, podName, nomeArquivo) {
-    // Garante que o nome tenha .tar.gz para buscar no MinIO
-    let nomeFinal = nomeArquivo;
-    if (!nomeFinal.endsWith('.tar.gz')) {
-        nomeFinal += '.tar.gz';
+    for await (const obj of dataStream) {
+        objects.push(obj);
     }
 
-    const pathNoBucket = `aluno_${userId}/${nomeFinal}`;
+    return objects;
+}
+
+async function checkQuota(userId) {
+    const files = await listFiles(userId);
+    const totalUsed = files.reduce((acc, curr) => acc + curr.size, 0);
+    return { totalUsed, permitted: totalUsed < MAX_SIZE_BYTES };
+}
+
+async function deleteFile(userId, fullName) {
+    if (typeof fullName !== 'string' || !fullName.trim()) {
+        throw new Error("Nome de arquivo inválido.");
+    }
+
+    if (!fullName.startsWith(`aluno_${userId}/`)){
+        throw new Error("Permissão negada: Você só pode deletar seus próprios arquivos.");
+    } 
+
+    await minioClient.removeObject(BUCKET_NAME, fullName);
+}
+
+async function restoreBackup(userId, podName, fileName) {
+    // Garante que o nome tenha .tar.gz para buscar no MinIO
+    let finalName = fileName;
+    if (!finalName.endsWith('.tar.gz')) {
+        finalName += '.tar.gz';
+    }
+
+    const pathNoBucket = `aluno_${userId}/${finalName}`;
     
-    // Restauramos direto na raiz (/home/mpiuser)
-    const command = ['tar', 'xzf', '-', '-C', '/home/mpiuser'];
+    // Restauramos direto na raiz (/home/user)
+    const command = ['tar', 'xzf', '-', '-C', '/home/user'];
 
     try {
         const dataStream = await minioClient.getObject(BUCKET_NAME, pathNoBucket);
 
-        await k8sExec.exec(
-            namespace, podName, 'mpi-container', command,
-            null, process.stderr, dataStream, false
+        await k8sService.connectPodToTerminal(
+            namespace, 
+            podName, 
+            'container', 
+            command,
+            null, 
+            process.stderr, 
+            dataStream, 
+            false
         );
 
         return { message: "Arquivos restaurados na home!" };
@@ -76,131 +92,177 @@ async function restaurarBackup(userId, podName, nomeArquivo) {
 }
 
 // --- SALVAR ---
-async function salvarBackup(userId, podName, nomeArquivo) {
+async function saveBackup(userId, podName, fileName) {
     // 1. Checa cota
-    const { permitido } = await verificarCota(userId);
-    if (!permitido) throw new Error('Cota de 100MB excedida.');
+    const { permitted } = await checkQuota(userId);
+    if (!permitted) throw new Error('Cota de 100MB excedida.');
 
-    const nomeLimpo = nomeArquivo.replace(/(\.tar\.gz)+$/g, '');
-    const nomeFinal = `aluno_${userId}/${nomeLimpo}.tar.gz`;
+    // 2. Segurança
+    if (typeof fileName !== 'string' || !fileName.trim()) throw new Error("Nome inválido");
+    const safeName = path.basename(fileName); 
+    
+    const cleanName = safeName.replace(/(\.tar\.gz)+$/g, '');
+    const finalName = `aluno_${userId}/${cleanName}.tar.gz`;
     
     const passThrough = new stream.PassThrough();
 
     const command = [
         'tar', 'czf', '-', 
-        '-C', '/home/mpiuser', 
+        '-C', '/home/user', 
         '--exclude=*.tar.gz',
         '--exclude=.ssh',
         '.'
     ];
 
     try {
-        // Executa o tar no Pod e joga a saída (stream) direto para o MinIO
-        await k8sExec.exec(
-            namespace, podName, 'mpi-container', command,
-            passThrough, process.stderr, process.stdin, false
+        const execPromise = k8sService.connectPodToTerminal(
+            namespace, 
+            podName, 
+            'container', 
+            command,
+            passThrough, 
+            process.stderr, 
+            process.stdin, 
+            false
         );
-
-        await minioClient.putObject(BUCKET_NAME, nomeFinal, passThrough);
-        return { message: "Salvo com sucesso!", arquivo: nomeFinal };
+        const uploadPromise = minioClient.putObject(BUCKET_NAME, finalName, passThrough);
+    
+        await Promise.all([execPromise, uploadPromise]); // Espera as duas promessas trabalharem em conjunto
+        return { message: "Salvo com sucesso!", arquivo: finalName };
     } catch (err) {
-        console.error("Erro backup:", err);
-        throw err;
+        console.error("Erro no fluxo do backup:", err);
+        throw new Error("Falha ao salvar backup no storage.");
     }
 }
 
-async function obterArquivoParaDownload(userId, nomeArquivo) {
-    let nomeFinal = `aluno_${userId}/${nomeArquivo}`;
-    if (!nomeFinal.endsWith('.tar.gz')) nomeFinal += '.tar.gz';
+async function getFileForDownload(userId, fileName) {
+    if (typeof fileName !== 'string' || !fileName.trim()) throw new Error("Nome inválido");
+    const safeName = path.basename(fileName);
+
+    let finalName = `aluno_${userId}/${safeName}`;
+    if (!finalName.endsWith('.tar.gz')) finalName += '.tar.gz';
 
     try {
-        return await minioClient.getObject(BUCKET_NAME, nomeFinal);
+        return await minioClient.getObject(BUCKET_NAME, finalName);
     } catch (e) {
-        console.error("Erro ao obter arquivo:", e);
-        throw e;
+        console.error(`Erro ao obter arquivo ${finalName}:`, e);
+        throw new Error("Arquivo não encontrado ou inacessível.");
     }
 }
 
-async function listarConteudoBackup(userId, nomeArquivo) {
-    let nomeFinal = `aluno_${userId}/${nomeArquivo}`;
-    if (!nomeFinal.endsWith('.tar.gz')) nomeFinal += '.tar.gz';
+async function listContentBackup(userId, fileName) {
+    if (typeof fileName !== 'string' || !fileName.trim()) throw new Error("Nome inválido");
+    const safeName = path.basename(fileName);
 
-    return new Promise(async (resolve, reject) => {
-        try {
-            const fileStream = await minioClient.getObject(BUCKET_NAME, nomeFinal);
-            const extract = tar.extract();
-            const files = [];
+    let finalName = `aluno_${userId}/${safeName}`;
+    if (!finalName.endsWith('.tar.gz')) finalName += '.tar.gz';
 
-            extract.on('entry', (header, stream, next) => {
-                files.push({ name: header.name, type: header.type, size: header.size });
+    const fileStream = await minioClient.getObject(BUCKET_NAME, finalName);
+    return new Promise((resolve, reject) => {
+        const extract = tar.extract();
+        const files = [];
+
+        extract.on('entry', (header, stream, next) => {
+            files.push({ name: header.name, type: header.type, size: header.size });
+            // Descarta o conteúdo do arquivo para ir logo pro próximo
+            stream.on('end', next);
+            stream.resume(); 
+        });
+
+        extract.on('finish', () => resolve(files));
+        extract.on('error', reject);
+        fileStream.on('error', reject); // Captura erros da conexão com MinIO
+
+        fileStream.pipe(zlib.createGunzip()).pipe(extract);
+    });
+}
+
+async function downloadInternalFile(userId, backupName, fileName) {
+    if (typeof backupName !== 'string' || !backupName.trim()) throw new Error("Nome inválido");
+    const safeName = path.basename(backupName);
+
+    let finalName = `aluno_${userId}/${safeName}`;
+    if (!finalName.endsWith('.tar.gz')) finalName += '.tar.gz';
+
+    const fileStream = await minioClient.getObject(BUCKET_NAME, finalName);
+    return new Promise((resolve, reject) => {
+        const extract = tar.extract();
+        let found = false;
+
+        extract.on('entry', (header, stream, next) => {
+            if (header.name === fileName) {
+                found = true;
+                resolve(stream); 
+                // 3. PERFORMANCE E FLUXO: Quando o arquivo alvo for 100% baixado pelo Express...
+                stream.on('end', () => {
+                    // Nós DESTRUÍMOS a stream do MinIO. Não queremos baixar o resto do backup!
+                    fileStream.destroy();
+                });
+            } else {
+                // Se não é o arquivo que queremos, descarta e vai pro próximo
                 stream.on('end', next);
-                stream.resume(); 
-            });
+                stream.resume();
+            }
+        });
 
-            extract.on('finish', () => resolve(files));
-            extract.on('error', (err) => reject(err));
+        extract.on('finish', () => {
+            if (!found) reject(new Error('Arquivo não encontrado.'));
+        });
 
-            fileStream.pipe(zlib.createGunzip()).pipe(extract);
-        } catch (e) { reject(e); }
+        extract.on('error', reject);
+        
+        fileStream.on('error', (err) => {
+            // Ignora o erro se fomos nós mesmos que destruímos a stream (economia de banda)
+            if (found) return; 
+            reject(err);
+        });
+
+        fileStream.pipe(zlib.createGunzip()).pipe(extract);
     });
 }
 
-async function baixarArquivoInterno(userId, nomeBackup, arquivoAlvo) {
-    let nomeFinal = `aluno_${userId}/${nomeBackup}`;
-    if (!nomeFinal.endsWith('.tar.gz')) nomeFinal += '.tar.gz';
+async function downloadInternalFolder(userId, backupName, targetFolder) {
+    if (typeof backupName !== 'string' || !backupName.trim()) throw new Error("Nome inválido");
+    const safeName = path.basename(backupName);
 
-    return new Promise(async (resolve, reject) => {
-        try {
-            const fileStream = await minioClient.getObject(BUCKET_NAME, nomeFinal);
-            const extract = tar.extract();
-            let found = false;
+    let finalName = `aluno_${userId}/${safeName}`;
+    if (!finalName.endsWith('.tar.gz')) finalName += '.tar.gz';
 
-            extract.on('entry', (header, stream, next) => {
-                if (header.name === arquivoAlvo) {
-                    found = true;
-                    resolve(stream); 
-                } else {
-                    stream.on('end', next);
-                    stream.resume();
-                }
-            });
+    const fileStream = await minioClient.getObject(BUCKET_NAME, finalName);
+    return new Promise((resolve, reject) => {
+        const extract = tar.extract();
+        const pack = tar.pack(); 
 
-            extract.on('finish', () => {
-                if (!found) reject(new Error('Arquivo não encontrado.'));
-            });
+        extract.on('entry', (header, stream, next) => {
+            if (header.name.startsWith(targetFolder)) {
+                // Copia o arquivo da tar antiga para a tar nova
+                // O pack.entry já chama o 'next' automaticamente quando finaliza a cópia
+                stream.pipe(pack.entry(header, next));
+            } else {
+                // Pula o arquivo
+                stream.on('end', next);
+                stream.resume();
+            }
+        });
 
-            fileStream.pipe(zlib.createGunzip()).pipe(extract);
-        } catch (e) { reject(e); }
+        extract.on('finish', () => pack.finalize());
+        extract.on('error', reject);
+        fileStream.on('error', reject);
+
+        fileStream.pipe(zlib.createGunzip()).pipe(extract);
+        
+        // Resolve imediatamente, o Controller fará o Pipe para o Express baixar!
+        resolve(pack.pipe(zlib.createGzip()));
     });
 }
 
-async function baixarPastaInterna(userId, nomeBackup, pastaAlvo) {
-    let nomeFinal = `aluno_${userId}/${nomeBackup}`;
-    if (!nomeFinal.endsWith('.tar.gz')) nomeFinal += '.tar.gz';
-
-    return new Promise(async (resolve, reject) => {
-        try {
-            const fileStream = await minioClient.getObject(BUCKET_NAME, nomeFinal);
-            const extract = tar.extract();
-            const pack = tar.pack(); 
-
-            extract.on('entry', (header, stream, next) => {
-                if (header.name.startsWith(pastaAlvo)) {
-                    stream.pipe(pack.entry(header, next));
-                } else {
-                    stream.on('end', next);
-                    stream.resume();
-                }
-            });
-
-            extract.on('finish', () => pack.finalize());
-            extract.on('error', (err) => reject(err));
-
-            fileStream.pipe(zlib.createGunzip()).pipe(extract);
-            resolve(pack.pipe(zlib.createGzip()));
-
-        } catch (e) { reject(e); }
-    });
-}
-
-module.exports = { listarArquivos, salvarBackup, deletarArquivo, restaurarBackup, obterArquivoParaDownload, listarConteudoBackup, baixarArquivoInterno, baixarPastaInterna };
+module.exports = { 
+    listFiles, 
+    saveBackup, 
+    deleteFile, 
+    restoreBackup, 
+    getFileForDownload, 
+    listContentBackup, 
+    downloadInternalFile, 
+    downloadInternalFolder 
+};
