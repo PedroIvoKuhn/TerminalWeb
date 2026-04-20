@@ -53,76 +53,100 @@ function initializeTerminal() {
 }
 
 // --- MiniO ---
+loadDownloadList();
+const fileCache = {};
 // --- 1. LISTAGEM DA TELA INICIAL (COM NAVEGAÇÃO) ---
-async function carregarListaDownloads() {
-    const listaUl = document.getElementById('download-list');
+const downloadListContainer = document.getElementById('download-list');
+
+if (downloadListContainer) {
+    downloadListContainer.addEventListener('click', (e) => {
+        const target = e.target.closest('[data-action]');
+        if (!target) return;
+
+        const action = target.getAttribute('data-action');
+        const fileName = target.getAttribute('data-file');
+
+        if (action === 'navigate') {
+            toggleNavigation(fileName, target);
+        } else if (action === 'delete') {
+            deleteFile(fileName);
+        } else if (action === 'toggle-folder') {
+            const nextDiv = target.parentElement.nextElementSibling;
+            nextDiv.style.display = nextDiv.style.display === 'none' ? 'block' : 'none';
+        }
+    });
+}
+
+async function loadDownloadList() {
+    const listUl = document.getElementById('download-list');
     const select = document.getElementById('select-backup');
     
     try {
         const res = await fetch('/api/backups');
         if (!res.ok) throw new Error("Erro ao buscar lista");
-        const arquivos = await res.json();
+        const files = await res.json();
 
         // 1. Preenche o Dropdown (Select)
         if(select) {
             select.innerHTML = '<option value="">-- Começar do Zero (Vazio) --</option>';
-            arquivos.forEach(arq => {
-                const nomeRaw = arq.name.split('/')[1];
-                if(!nomeRaw) return;
-                const nomeLimpo = nomeRaw.replace('.tar.gz', '');
+            files.forEach(arq => {
+                const rawName = arq.name.split('/')[1];
+                if(!rawName) return;
+                const cleanName = rawName.replace('.tar.gz', '');
                 const option = document.createElement('option');
-                option.value = nomeLimpo;
-                option.textContent = `📂 ${nomeLimpo}`;
+                option.value = cleanName;
+                option.textContent = `📂 ${cleanName}`;
                 select.appendChild(option);
             });
             if(currentLoadedBackup) select.value = currentLoadedBackup;
         }
 
         // 2. Preenche a Lista de Baixo (Downloads + Navegação)
-        if (listaUl) {
-            listaUl.innerHTML = '';
+        if (listUl) {
+            listUl.innerHTML = '';
             
-            if (arquivos.length === 0) {
-                listaUl.innerHTML = '<li style="color:#777; font-size: 0.9em;">Nenhum arquivo encontrado.</li>';
+            if (files.length === 0) {
+                listUl.innerHTML = '<li style="color:#777; font-size: 0.9em;">Nenhum arquivo encontrado.</li>';
                 return;
             }
 
-            arquivos.forEach(arq => {
-                const nomeRaw = arq.name.split('/')[1]; 
-                if(!nomeRaw) return;
-                const nomeLimpo = nomeRaw.replace('.tar.gz', '');
-                const tamanho = (arq.size / 1024 / 1024).toFixed(2);
-                const linkDownloadBackup = `/api/download?fileName=${encodeURIComponent(nomeRaw)}`;
+            files.forEach(file => {
+                const rawName = file.name.split('/')[1]; 
+                if(!rawName) return;
+
+                const cleanName = rawName.replace('.tar.gz', '');
+                const sizeMB = (file.size / 1024 / 1024).toFixed(2);
+                const downloadLink = `/api/download?fileName=${encodeURIComponent(rawName)}`;
 
                 const li = document.createElement('li');
                 li.style.cssText = "background: #333; margin-bottom: 5px; padding: 10px; border-radius: 4px; border: 1px solid #444;";
                 
                 li.innerHTML = `
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-weight:bold; color:#f1f1f1;">📦 ${nomeLimpo} <small style="color:#aaa; font-weight:normal;">(${tamanho} MB)</small></span>
+                        <span style="font-weight:bold; color:#f1f1f1;">📦 ${cleanName} <small style="color:#aaa; font-weight:normal;">(${sizeMB} MB)</small></span>
                         
                         <div>
-                            <button onclick="toggleNavegacao('${nomeRaw}', this)" style="background:#17a2b8; color:white; border:none; padding:6px 12px; cursor:pointer; border-radius:4px; font-size: 0.8em; margin-right: 5px;">
+                            <button data-action="navigate" data-file="${rawName}"                      style="background:#17a2b8; color:white; border:none; padding:6px 12px; cursor:pointer; border-radius:4px; font-size: 0.8em; margin-right: 5px;">
                                 📂 Navegar
                             </button>
 
-                            <a href="${linkDownloadBackup}" target="_blank" style="text-decoration:none; margin-right: 5px;">
+                            <a href="${downloadLink}" target="_blank" style="text-decoration:none; margin-right: 5px;">
                                 <button style="background:#007bff; color:white; border:none; padding:6px 12px; cursor:pointer; border-radius:4px; font-size: 0.8em; font-weight:bold;">
                                     ⬇️ Baixar
                                 </button>
                             </a>
 
-                            <button onclick="deletar('${arq.name}')" style="background:#dc3545; color:white; border:none; padding:6px 12px; cursor:pointer; border-radius:4px; font-size: 0.8em;">
+                            <button data-action="delete" data-file="${file.name}" style="background:#dc3545; color:white; border:none; padding:6px 12px; cursor:pointer; border-radius:4px; font-size: 0.8em;">
                                 🗑️ Apagar
                             </button>
                         </div>
                     </div>
                     
-                    <div id="tree-container-${nomeLimpo}" style="display:none; margin-top:10px; padding-left:10px; border-left:1px solid #555;">
+                    <div id="tree-container-${cleanName}" style="display:none; margin-top:10px; padding-left:10px; border-left:1px solid #555;">
                         <small style="color:#aaa">Carregando...</small>
                     </div>
                 `;
-                listaUl.appendChild(li);
+                listUl.appendChild(li);
             });
         }
     } catch (e) {
@@ -131,99 +155,99 @@ async function carregarListaDownloads() {
 }
 
 // --- 2. LÓGICA DA ÁRVORE (Tree View) ---
-async function toggleNavegacao(nomeRawBackup, btn) {
-    const nomeLimpo = nomeRawBackup.replace('.tar.gz', '');
-    const container = document.getElementById(`tree-container-${nomeLimpo}`);
+async function toggleNavigation(rawBackupName, btnElement) {
+    const cleanName = rawBackupName.replace('.tar.gz', '');
+    const container = document.getElementById(`tree-container-${cleanName}`);
     
     if (container.style.display === 'block') {
         container.style.display = 'none';
-        btn.innerText = '📂 Navegar';
+        btnElement.innerText = '📂 Navegar';
         return;
     }
 
     container.style.display = 'block';
-    btn.innerText = '📂 Fechar';
+    btnElement.innerText = '📂 Fechar';
 
-    if (cacheArquivos[nomeRawBackup]) {
-        desenharArvore(container, cacheArquivos[nomeRawBackup], nomeRawBackup);
+    if (fileCache[rawBackupName]) {
+        drawTree(container, fileCache[rawBackupName], rawBackupName);
         return;
     }
 
     try {
-        const res = await fetch(`/api/backups/content?fileName=${encodeURIComponent(nomeRawBackup)}`);
+        const res = await fetch(`/api/backups/content?fileName=${encodeURIComponent(rawBackupName)}`);
         if (!res.ok) throw new Error("Erro ao carregar");
         const files = await res.json();
         
-        cacheArquivos[nomeRawBackup] = files;
-        desenharArvore(container, files, nomeRawBackup);
+        fileCache[rawBackupName] = files;
+        drawTree(container, files, rawBackupName);
     } catch (e) { 
         container.innerHTML = '<span style="color:red">Erro ao carregar arquivos.</span>'; 
     }
 };
 
-function desenharArvore(container, todosArquivos, nomeBackup) {
+function drawTree(container, allFiles, backupName) {
     container.innerHTML = '';
-    const listaLimpa = todosArquivos.filter(f => f.name && f.name.trim() !== '');
+    const cleanList = allFiles.filter(f => f.name && f.name.trim() !== '');
     
-    if (listaLimpa.length === 0) {
+    if (cleanList.length === 0) {
         container.innerHTML = '<small style="color:#777">Backup vazio.</small>';
         return;
     }
-    container.appendChild(renderizarNivel(listaLimpa, '', nomeBackup));
+    container.appendChild(renderTreeLevel(cleanList, '', backupName));
 }
 
-function renderizarNivel(todosArquivos, prefixoAtual, nomeBackup) {
+function renderTreeLevel(allFiles, currentPrefix, backupName) {
     const ul = document.createElement('ul');
     ul.style.listStyle = 'none';
     ul.style.paddingLeft = '15px';
     ul.style.marginTop = '5px';
 
-    let pastas = new Set();
-    let arquivos = [];
+    let folders = new Set();
+    let files = [];
 
-    todosArquivos.forEach(file => {
-        if (!file.name.startsWith(prefixoAtual)) return;
+    allFiles.forEach(file => {
+        if (!file.name.startsWith(currentPrefix)) return;
         
-        const relativo = file.name.slice(prefixoAtual.length);
-        const partes = relativo.split('/');
+        const relativePath = file.name.slice(currentPrefix.length);
+        const parts = relativePath.split('/');
 
-        if (partes.length > 1 && partes[0] !== '') {
-            pastas.add(partes[0]);
-        } else if (partes.length === 1 && partes[0] !== '') {
+        if (parts.length > 1 && parts[0] !== '') {
+            folders.add(parts[0]);
+        } else if (parts.length === 1 && parts[0] !== '') {
             if (file.type !== 'directory' && !file.name.endsWith('/')) {
-                arquivos.push({ ...file, nomeCurto: partes[0] });
+                files.push({ ...file, shortName: parts[0] });
             }
         }
     });
 
-    pastas.forEach(nomePasta => {
+    folders.forEach(folderName => {
         const li = document.createElement('li');
-        const novoPrefixo = prefixoAtual + nomePasta + '/';
-        const linkZip = `/api/backups/download-folder?backupName=${nomeBackup}&folder=${encodeURIComponent(novoPrefixo)}`;
+        const newPrefix = currentPrefix + folderName + '/';
+        const linkZip = `/api/backups/download-folder?backupName=${backupName}&folder=${encodeURIComponent(newPrefix)}`;
 
         li.innerHTML = `
             <div style="padding:3px 0; display:flex; justify-content:space-between; align-items:center;">
                 <span style="cursor:pointer; color: #f3ff4dff; flex:1;" onclick="this.parentElement.nextElementSibling.style.display = (this.parentElement.nextElementSibling.style.display === 'none' ? 'block' : 'none');">
-                    ▶ 📁 ${nomePasta}
+                    ▶ 📁 ${folderName}
                 </span>
                 <a href="${linkZip}" target="_blank" onclick="event.stopPropagation()">
                     <button style="background:none; border:2px solid #4db8ff; color:#4db8ff; cursor:pointer; padding:6px 12px; font-size:0.7em; border-radius:5px;">⬇️ .ZIP</button>
                 </a>
             </div>
         `;
-        const divFilhos = document.createElement('div');
-        divFilhos.style.display = 'none';
-        divFilhos.appendChild(renderizarNivel(todosArquivos, novoPrefixo, nomeBackup));
-        li.appendChild(divFilhos);
+        const childDiv = document.createElement('div');
+        childDiv.style.display = 'none';
+        childDiv.appendChild(renderTreeLevel(allFiles, newPrefix, backupName));
+        li.appendChild(childDiv);
         ul.appendChild(li);
     });
 
-    arquivos.forEach(arq => {
+    files.forEach(file => {
         const li = document.createElement('li');
         li.style.cssText = "padding:3px 0; display:flex; justify-content:space-between; border-bottom:1px dashed #444; align-items:center;";
-        const link = `/api/backups/download-single?backupName=${nomeBackup}&file=${encodeURIComponent(arq.name)}`;
+        const link = `/api/backups/download-single?backupName=${backupName}&file=${encodeURIComponent(file.name)}`;
         li.innerHTML = `
-            <span style="color:#ccc;">📄 ${arq.nomeCurto}</span>
+            <span style="color:#ccc;">📄 ${file.shortName}</span>
             <a href="${link}" target="_blank">
                 <button style="background:none; border:2px solid #4db8ff; color:#4db8ff; cursor:pointer; padding:6px 12px; font-size:0.7em; border-radius:5px;">⬇️ ARQUIVO</button>
             </a>
@@ -234,47 +258,41 @@ function renderizarNivel(todosArquivos, prefixoAtual, nomeBackup) {
     return ul;
 }
 
-carregarListaDownloads();
-
-
 // --- CONTROLE DA INTERFACE DE BACKUP ---
-function atualizarInterfaceBackup() {
-    const areaAtual = document.getElementById('area-salvar-atual');
-    const lblAtual = document.getElementById('lbl-nome-atual');
-    const btnAtual = document.getElementById('btn-salvar-atual');
+function updateBackupUI() {
+    const currentArea = document.getElementById('area-salvar-atual');
+    const currentLbl = document.getElementById('lbl-nome-atual');
+    const currentBtn = document.getElementById('btn-salvar-atual');
 
-    if (currentLoadedBackup && areaAtual) {
-        areaAtual.style.display = 'flex';
-        lblAtual.textContent = currentLoadedBackup;
+    if (currentLoadedBackup && currentArea) {
+        currentArea.style.display = 'flex';
+        currentLbl.textContent = currentLoadedBackup;
 
-        btnAtual.onclick = function() {
-            window.salvarArquivo(currentLoadedBackup);
-        };
-    } else if (areaAtual) {
-        areaAtual.style.display = 'none';
+        currentBtn.onclick = () => saveFile(currentLoadedBackup);
+    } else if (currentArea) {
+        currentArea.style.display = 'none';
     }
 }
 
 // --- Lógica de Backup (Agora só calcula Cota e atualiza listas externas) ---
-async function carregarBackups() {
-    const status = document.getElementById('status-cota');
-
-    await carregarListaDownloads(); 
+async function loadBackups() {
+    const statusLbl = document.getElementById('status-cota');
+    await loadDownloadList(); 
 
     try {
         const res = await fetch('/api/backups');
-        if (res.status === 401) {
+        if (res.statusLbl === 401) {
             console.warn("Sessão não autorizada");
             return;
         }
-        const arquivos = await res.json();
+        const files = await res.json();
         
         let totalSize = 0;
-        arquivos.forEach(arq => {
+        files.forEach(arq => {
             totalSize += arq.size;
         });
         
-        if(status) status.innerText = `Uso: ${(totalSize/1024/1024).toFixed(2)} / 100 MB`;
+        if(statusLbl) statusLbl.innerText = `Uso: ${(totalSize/1024/1024).toFixed(2)} / 100 MB`;
 
     } catch (e) {
         console.error("Erro cota", e);
@@ -282,16 +300,16 @@ async function carregarBackups() {
 }
 
 // --- SALVAR ---
-window.salvarArquivo = async function(nomeAlvo) {
+async function saveFile(targetName) {
     if(!myMasterPodName) return alert('Erro: Pod não conectado.');
     
-    nomeAlvo = nomeAlvo.trim();
-    if(!nomeAlvo) return alert("Nome inválido");
+    targetName = targetName.trim();
+    if(!targetName) return alert("Nome inválido");
 
-    const jaExiste = Array.from(selectBackup.options).some(o => o.value === nomeAlvo);
+    const alreadyExists = Array.from(selectBackup.options).some(o => o.value === targetName);
 
-    if (jaExiste && nomeAlvo !== currentLoadedBackup) {
-        if(!confirm(`O arquivo "${nomeAlvo}" JÁ EXISTE! \n\nDeseja sobreescrever?`)) return;
+    if (alreadyExists && targetName !== currentLoadedBackup) {
+        if(!confirm(`O arquivo "${targetName}" JÁ EXISTE! \n\nDeseja sobreescrever?`)) return;
     }
 
     try {
@@ -300,61 +318,61 @@ window.salvarArquivo = async function(nomeAlvo) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 podName: myMasterPodName, 
-                fileName: nomeAlvo 
+                fileName: targetName 
             })
         });
-        
         const json = await res.json();
         
-        if(json.error) alert('Erro: ' + json.error);
-        else {
+        if(json.error){ 
+            alert('Erro: ' + json.error);
+        } else {
             alert('Salvo com sucesso!');
-            currentLoadedBackup = nomeAlvo;
-            atualizarInterfaceBackup(); 
-            socket.emit('update-active-backup', nomeAlvo);
+            currentLoadedBackup = targetName;
+            updateBackupUI(); 
+            socket.emit('update-active-backup', targetName);
 
-            const nomeRaw = nomeAlvo + ".tar.gz";
-            if(cacheArquivos[nomeRaw]) delete cacheArquivos[nomeRaw];
+            const rawName = targetName + ".tar.gz";
+            if(fileCache[rawName]) delete fileCache[rawName];
             
-            await carregarBackups();
+            await loadBackups();
             
-            const inputNovo = document.getElementById('nome-backup');
-            if(inputNovo) inputNovo.value = '';
+            const inputNew = document.getElementById('nome-backup');
+            if(inputNew) inputNew.value = '';
         }
     } catch(e) { 
         alert('Erro de conexão ao salvar.'); 
     }
 };
 
-const btnSalvarNovo = document.getElementById('btn-salvar-novo');
-if(btnSalvarNovo) {
-    btnSalvarNovo.addEventListener('click', () => {
-        let nome = document.getElementById('nome-backup').value;
-        if(!nome) return alert("Digite um nome para o novo arquivo.");
-        window.salvarArquivo(nome);
+const btnSaveNew = document.getElementById('btn-salvar-novo');
+if(btnSaveNew) {
+    btnSaveNew.addEventListener('click', () => {
+        let nameInput = document.getElementById('nome-backup').value;
+        if(!nameInput) return alert("Digite um nome para o novo arquivo.");
+        saveFile(nameInput);
     });
 }
 
 // --- DELETAR ---
-window.deletar = async (nome) => {
+async function deleteFile(fullName) {
     if(!confirm('Tem certeza que deseja APAGAR este arquivo permanentemente?')) return;
     
     try {
         await fetch('/api/backups', {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fullName: nome })
+            body: JSON.stringify({ fullName: fullName })
         });
         
-        const nomeLimpo = nome.split('/')[1].replace('.tar.gz', '');
-        if (cacheArquivos[nome]) delete cacheArquivos[nome];
+        const cleanName = fullName.split('/')[1].replace('.tar.gz', '');
+        if (fileCache[fullName]) delete fileCache[fullName];
 
-        if(nomeLimpo === currentLoadedBackup) {
+        if(cleanName === currentLoadedBackup) {
             currentLoadedBackup = null;
-            atualizarInterfaceBackup();
+            updateBackupUI();
         }
 
-        await carregarBackups();
+        await loadBackups();
         alert('Arquivo apagado.');
 
     } catch (e) {
@@ -363,14 +381,13 @@ window.deletar = async (nome) => {
     }
 };
 
-// --- Funções do contador ---
+// --- FUNÇÕES DO CONTADOR ---
 let countdownInterval;
 const timerBar = document.getElementById('timer-bar');
 const countdownDisplay = document.getElementById('countdown-display');
 const sessionModal = document.getElementById('session-modal');
 
-// Função para formatar milissegundos em HH:MM:SS
-function formatTime(ms) {
+function formatTime(ms) { // Formata milissegundos em HH:MM:SS
     if (ms < 0) ms = 0;
     const h = Math.floor(ms / 3600000).toString().padStart(2, '0');
     const m = Math.floor((ms % 3600000) / 60000).toString().padStart(2, '0');
@@ -380,9 +397,8 @@ function formatTime(ms) {
 
 function startCountdown(expiresAt) {
     timerBar.style.display = 'flex';
-    timerBar.classList.remove('timer-critical'); // Remove alerta vermelho se houver
+    timerBar.classList.remove('timer-critical');
 
-    // Limpa timer anterior se existir (caso seja uma extensão)
     if (countdownInterval) clearInterval(countdownInterval);
 
     countdownInterval = setInterval(() => {
@@ -420,8 +436,8 @@ function startCountdown(expiresAt) {
         }
     }, 1000);
 }
-// --- EVENTOS SOCKET ---
 
+// --- EVENTOS SOCKET ---
 term.onData(data => socket.emit('input', data));
 socket.on('output', data => term.write(data));
 
@@ -455,8 +471,8 @@ socket.on('session-ready', (data) => {
         const backupUi = document.getElementById('backup-ui');
         if(backupUi) {
             backupUi.style.display = 'block';
-            atualizarInterfaceBackup();
-            carregarBackups();
+            updateBackupUI();
+            loadBackups();
         }
     }
 
@@ -471,7 +487,7 @@ socket.on('connect_error', (err) => {
     term.write(`\r\n[ERRO DE CONEXÃO]: ${err.message}`);
 });
 
-// SESSION SOCKETS
+// --- SESSION SOCKETS ---
 socket.on('session:update', (data) => {
     startCountdown(data.expiresAt);
     setTimeout(() => {
