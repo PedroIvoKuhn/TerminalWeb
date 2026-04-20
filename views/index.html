@@ -4,7 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web Terminal</title>
+    <meta name="user-id" content="{{USER_ID}}">
+    <title>Terminal Web</title>
     <meta name="image" content="{{IMAGE}}">
     <link rel="stylesheet" href="/xterm/css/xterm.css" />
     <link rel="stylesheet" href="/css/global.css"/> 
@@ -36,16 +37,51 @@
         <p>Quantos nós (máquinas) você deseja para sua aplicação?</p>
         <form id="setup-form">
             <input type="number" id="num-machines" value="2" min="1" required>
+            <select id="select-backup">
+            <option value="">-- Começar do Zero (Vazio) --</option>
+            </select>
             <button type="submit">Iniciar Terminal</button>
         </form>
+
+        <div class="files">
+        <h3 class="my-files">📂 Meus Arquivos</h3>
+        <ul id="download-list">
+            <li style="color:#777">Carregando...</li>
+        </ul>
+    </div>
     </div>
 
     <div id="terminal-container">
-        <div id="machine-info">
-            <h3>Máquinas Disponíveis:</h3>
-            <ul id="machine-list">
-            </ul>
-        </div>
+        <div id="container-principal">
+            <div id="machine-info">
+                <h3> 🖥️ Máquinas Disponíveis:</h3>
+                <ul id="machine-list"></ul>
+            </div>
+
+            <div id="backup-ui">
+                <div class="backup-container">
+                    <h3 style="margin: 0; font-size: 1.1em;"> 💾 Salvar Progresso</h3>
+                    <small id="status-cota">
+                        Calculando...
+                    </small>
+                </div>
+
+                <div id="area-salvar-atual">
+                    <span style="color: #ddd;">
+                        Arquivo atual: <strong id="lbl-nome-atual" style="color:#fff; margin-left:5px;">--</strong>
+                    </span>
+                    <button id="btn-salvar-atual">
+                        💾 Salvar
+                    </button>
+                </div>
+
+                <div class="input-backup">
+                    <input type="text" id="nome-backup" placeholder="Nome do novo arquivo...">
+                    <button id="btn-salvar-novo">
+                        Salvar Novo
+                    </button>
+                </div>
+            </div>
         <hr>
         <div id="terminal"></div>
     </div>

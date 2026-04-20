@@ -1,33 +1,70 @@
-const { k8sExec, namespace } = require('../config/kubernetes');
 const k8sService = require('./k8sService');
 const sshService = require('./sshService');
+const minioService = require('./minioService');
 const sessionService = require('./sessionService');
-const { V1TopologySelectorTerm } = require('@kubernetes/client-node');
 
 module.exports = (io) => {
     io.on('connection', (socket) => {
-        socket.on('start-session', async ({numMachines, image}) => {
+        const session = socket.request.session;
+        let userId = session ? session.userId : null;
+
+        if (!userId && process.env.NODE_ENV === 'development') {
+            userId = 'devUser';
+        }
+
+        console.log(`[Socket] Conectado. UserID da Sessão: ${userId}`);
+        socket.data.userId = userId;
+        socket.data.activeBackupName = null;
+
+        socket.on('start-session', async (data) => {
+            let { numMachines, image, backupName } = data;
             const jobId = `job-${socket.id.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
             const secretName = `ssh-keys-${jobId}`;
+            const currentUserId = socket.data.userId;
+
             socket.data.jobId = jobId;
+            socket.data.activeBackupName = backupName || null;
+
+            if (!currentUserId) {
+                console.log("[Socket] Bloqueio: Usuário não identificado.");
+                socket.emit('output', '⛔ Erro: Sessão inválida ou expirada. Recarregue a página no Moodle.\r\n');
+                return;
+            }
 
             socket.emit('output', `\r\nIniciando ${numMachines} nós usando a imagem ${image}...\r\n`);
             
             try {
-                // Gerar Chaves
                 socket.emit('output', 'Gerando chaves e configuração SSH...\r\n');
                 const keys = await sshService.generateSSHKeys();
-              
-                // Iniciar contador
-                const expiresAt = sessionService.startSession(jobId, socket, numMachines);
+
+                const expiresAt = sessionService.startSession(jobId, socket, numMachines, currentUserId, backupName);
                 socket.emit('session:update', { expiresAt: expiresAt });
 
                 // Criar a infraestrutura
-                const { masterPodName } = await k8sService.createClusterResources(jobId, numMachines, image, keys, expiresAt, numMachines);
+                const clusterInfo = {
+                    jobId, 
+                    numMachines, 
+                    image, 
+                    keys, 
+                    expiresAt,
+                    userId: currentUserId,
+                    activeBackupName: backupName,
+                };
+                const { masterPodName } = await k8sService.createClusterResources(clusterInfo);
                 socket.emit('output', `Pods criados. Aguardando o nó mestre ficar pronto...\r\n`);
 
-                // Esperar ficar pronto
                 await k8sService.waitForPodRunning(masterPodName);
+
+                if (backupName) {
+                    socket.emit('output', `📦 Restaurando backup: "${backupName}"... `);
+                    try {
+                        await minioService.restoreBackup(userId, masterPodName, backupName);
+                        socket.emit('output', `[OK]\r\n`);
+                    } catch (restoreErr) {
+                        console.error(restoreErr);
+                        socket.emit('output', `[FALHA AO RESTAURAR]: ${restoreErr.message}\r\n`);
+                    }
+                }
 
                 const machineAliases = ['master'];
                 for (let i = 1; i < numMachines; i++) {
@@ -38,21 +75,14 @@ module.exports = (io) => {
                 
                 socket.emit('session-ready', { 
                     aliases: machineAliases,
-                    jobId: jobId 
+                    jobId: jobId,
+                    masterPodName: masterPodName 
                 });
                 socket.emit('output', `\r\n✅ Conectado! Apelidos SSH configurados.\r\n`);
                 socket.emit('output', `Tente: ssh worker-1 \r\n\r\n`);
             } catch (err) {
                 await handlePodError(err, socket, jobId, secretName);
             }
-        });
-
-        socket.on('session:extend-response', async () => {
-          await sessionService.extendSession(socket.data.jobId, 1000 * 60 * 60);
-        });
-
-        socket.on('session:extend-24h', async () => {
-          await sessionService.extendSession(socket.data.jobId, 1000 * 60 * 60 * 24);
         });
 
         socket.on('restore-session', async ({ jobId, machine }) => {
@@ -91,6 +121,19 @@ module.exports = (io) => {
             }
         });
 
+        socket.on('session:extend-response', async () => {
+          await sessionService.extendSession(socket.data.jobId, 1000 * 60 * 60);
+        });
+
+        socket.on('session:extend-24h', async () => {
+          await sessionService.extendSession(socket.data.jobId, 1000 * 60 * 60 * 24);
+        });
+
+        socket.on('update-active-backup', (novoNome) => {
+            console.log(`[Socket] Backup ativo atualizado para: ${novoNome}`);
+            socket.data.activeBackupName = novoNome;
+        });
+
         socket.on("kill-session", async () => {
             const jobId = socket.data.jobId;
             if (!jobId) return;
@@ -98,8 +141,18 @@ module.exports = (io) => {
             await sessionService.terminateSession(jobId);
         });
 
-        socket.on("disconnect", () => {
-            const jobId = socket.data.jobId;
+        socket.on("disconnect", async () => {
+            const { jobId, execWs } = socket.data;
+
+            if (execWs) {
+                try {
+                    execWs.close();
+                } catch (error) {
+                    execWs.terminate();
+                }
+                console.log(`[Socket] Conexão K8s-Exec fechada junto com o socket`);
+            }
+
             if (!jobId) return;
 
             sessionService.removeSocket(jobId, socket);
@@ -108,22 +161,12 @@ module.exports = (io) => {
 };
 
 async function connectTerminal(socket, jobId, masterPodName) {
-    const command = ['/bin/bash'];
-    const execWs = await k8sExec.exec(
-        namespace, 
-        masterPodName, 
-        'container', 
-        command, 
-        process.stdout, 
-        process.stderr, 
-        process.stdin, 
-        true);
+    const execWs = await k8sService.connectPodToTerminal(masterPodName);
+    socket.data.execWs = execWs;
 
     setupTerminalInput(socket, execWs);
     execWs.onmessage = (event) => handleTerminalOutput(event, socket, jobId);
     execWs.onclose = () => handleTerminalClose(socket);
-
-    return execWs;
 }
 
 function handleTerminalOutput(event, socket, jobId) {

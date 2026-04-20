@@ -1,5 +1,5 @@
 const k8s = require('@kubernetes/client-node');
-const { k8sApi, namespace, kc } = require('../config/kubernetes');
+const { k8sApi, namespace, kc, k8sExec } = require('../config/kubernetes');
 
 // --  Funções privadas
 
@@ -81,10 +81,20 @@ async function waitForPodRunning(name) {
     });
 }
 
-async function createClusterResources(jobId, numMachines, image, keys, expiresAt, numMachines) {
+async function createClusterResources(clusterInfo) {
+    const { jobId, image, keys, expiresAt, numMachines, userId, activeBackupName } = clusterInfo;
     const masterPodName = `master-${jobId}`;
     const serviceName = `svc-${jobId}`;
     const secretName = `ssh-keys-${jobId}`;
+
+    try {
+        // Tenta deletar o secret se ele já existir (ignora erro se não existir)
+        await k8sApi.deleteNamespacedSecret(secretName, namespace);
+        await k8sApi.deleteNamespacedService(serviceName, namespace);
+    } catch (e) {
+        // Ignora erro 404 (Not Found), qualquer outro erro mostra no log
+        if (e.body && e.body.code !== 404) console.log("Aviso de limpeza:", e.body.message);
+    }
 
     // Cria o secret
     const sshConfig = generateSshConfig(numMachines, jobId, masterPodName, serviceName);
@@ -111,7 +121,9 @@ async function createClusterResources(jobId, numMachines, image, keys, expiresAt
                 labels: { 'job-id': jobId, 'role': i === 0 ? 'master' : 'worker' },
                 annotations: {
                   'terminalWeb/expiresAt': expiresAt.toString(),
-                  'terminalWeb/numMachines': numMachines.toString()
+                  'terminalWeb/numMachines': numMachines.toString(),
+                  'terminalWeb/userId': userId.toString(),
+                  'terminalWeb/activeBackupName': activeBackupName.toString(),
                 }
             },
             spec: {
@@ -213,12 +225,16 @@ async function getActiveJobs() {
       const jobId = labels["job-id"];
       const expiresAtStr = annotations["terminalWeb/expiresAt"];
       const numMachinesStr =  annotations["terminalWeb/numMachines"];
+      const userId = annotations["terminalWeb/userId"];
+      const activeBackupName = annotations["terminalWeb/activeBackupName"];
 
       if (jobId && expiresAtStr) {
         activeSessionsData.push({
           jobId: jobId,
           expiresAt: parseInt(expiresAtStr, 10),
-          numMachines: parseInt(numMachinesStr, 10) || 2
+          numMachines: parseInt(numMachinesStr, 10) || 2,
+          userId: userId,
+          activeBackupName: activeBackupName,
         })
       }
     }
@@ -260,4 +276,31 @@ async function updateJobExpiration(jobId, newExpiresAt) {
     }
 }
 
-module.exports = { waitForPodRunning, cleanupJob, createClusterResources, getActiveJobs, updateJobExpiration};
+async function connectPodToTerminal(
+    masterPodName, 
+    command = ['/bin/bash'], 
+    stdoutStream = process.stdout, 
+    stderrStream = process.stderr, 
+    stdinStream = process.stdin, 
+    isTty = true
+) {
+    return await k8sExec.exec(
+        namespace, 
+        masterPodName, 
+        'container', 
+        command, 
+        stdoutStream, 
+        stderrStream, 
+        stdinStream, 
+        isTty
+    );
+}
+
+module.exports = { 
+    waitForPodRunning, 
+    cleanupJob, 
+    createClusterResources, 
+    getActiveJobs, 
+    updateJobExpiration,
+    connectPodToTerminal,
+};

@@ -3,19 +3,37 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
+const bodyParser = require('body-parser');
+const session = require('express-session');
 
 const ltiController = require('./controllers/ltiController');
 const socketService = require('./services/socketService');
+const minioController = require('./controllers/minioController');
 const sessionService = require('./services/sessionService.js')
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 const PORT = process.env.PORT || 3000;
+if (process.env.NGROK_AUTH === 'true'){app.set('trust proxy', 1);}
+    
 
+app.use(bodyParser.json());
+const sessionMiddleware = session({
+    secret: process.env.SESSION_SECRET || 'segredo-padrao-dev',
+    resave: false,
+    saveUninitialized: true,
+    cookie: { 
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'none'
+    }
+});
+app.use(sessionMiddleware);
+io.engine.use(sessionMiddleware);
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/xterm', express.static(path.join(__dirname, 'node_modules/xterm')));
 app.use('/xterm-addon-fit', express.static(path.join(__dirname, 'node_modules/xterm-addon-fit')));
+app.use('/api', minioController);
 
 async function start() {
     try {

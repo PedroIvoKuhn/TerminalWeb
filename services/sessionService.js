@@ -1,4 +1,5 @@
 const k8sService = require('./k8sService');
+const minioService = require('./minioService');
 
 // Configurações de Tempo (em milissegundos)
 /*
@@ -12,7 +13,7 @@ const WARNING_BEFORE = 20 * 60 * 1000;        // 20 Minutos antes de acabar
 // Armazena os timers ativos: { jobId: { killTimer, warnTimer, expiresAt } }
 const activeSessions = {};
 
-function startSession(jobId, socket, numMachines) {
+function startSession(jobId, socket, numMachines, userId, backupName) {
     const now = Date.now();
     const expiresAt = now + INITIAL_DURATION;
     
@@ -23,6 +24,8 @@ function startSession(jobId, socket, numMachines) {
         sockets: new Set([socket]),
         numMachines: numMachines,
         expiresAt: expiresAt,
+        userId: userId,
+        activeBackupName: backupName,
         // 1. Timer do Aviso
         warnTimer: setTimeout(() => {
             sendWarning(jobId);
@@ -107,6 +110,18 @@ async function terminateSession(jobId) {
     
     try {
         const secretName = `ssh-keys-${jobId}`;
+        const masterPodName = `master-${jobId}`;
+
+        if (session.userId && session.activeBackupName && masterPodName) {
+          console.log(`[Auto-Save] Salvando automaticamente em: ${session.activeBackupName}`);
+          try {
+            await minioService.saveBackup(session.userId, masterPodName, session.activeBackupName);
+            console.log(`[Auto-Save] Sucesso!`);
+          } catch (err) {
+            console.error(`[Auto-Save] Falha ao salvar no encerramento:`, err.message);
+          }
+        }
+
         await k8sService.cleanupJob(jobId, secretName);
         console.log(`[SESSION] K8s limpo com sucesso para ${jobId}.`);
     } catch (err) {
@@ -132,13 +147,15 @@ async function syncSessionsK8s() {
     if (timeLeft <= 0) {
       terminateSession(session.jobId);
     } else {
-      console.log(`[SYNC] Restaurando timers`);
+      console.log(`[SYNC] Restaurando sessões`);
       
       const warnTimeLeft = timeLeft - WARNING_BEFORE; 
       
       activeSessions[session.jobId] = {
         expiresAt: session.expiresAt,
         numMachines: session.numMachines,
+        userId: session.userId,
+        activeBackupName: session.activeBackupName,
         sockets: new Set(),
         
         killTimer: setTimeout(() => {
