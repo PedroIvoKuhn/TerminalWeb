@@ -25,8 +25,13 @@
 .btn-danger, #btn-ignore        { background-color: var(--vermelho); } 
 .btn-danger:hover, #btn-ignore:hover  { background-color: var(--vermelho-contraste); }
 
-.btn-extend-24h, #btn-reload, .init-terminal { background: var(--azul); }
-.btn-extend-24h:hover, .init-terminal:hover        { background: var(--azul-contraste); }
+.btn-extend-24h, #btn-reload, .init-terminal, .btn-download, .btn-outline { 
+    background: var(--azul); 
+}
+
+.btn-extend-24h:hover, .init-terminal:hover, .btn-download:hover, .btn-outline:hover { 
+    background: var(--azul-contraste); 
+}
 .btn-extend-24h:disabled     { background-color: var(--cinza); cursor: not-allowed; }
 
 #btn-extend, #btn-salvar-novo { 
@@ -38,8 +43,8 @@
     background: var(--verde-contraste);
 }
 
-#btn-salvar-atual  { background: var(--azul-petroleo); }
-#btn-salvar-atual:hover  { background: var(--azul-petroleo-contraste); }
+#btn-salvar-atual, .btn-info  { background: var(--azul-petroleo); }
+#btn-salvar-atual:hover, .btn-info:hover  { background: var(--azul-petroleo-contraste); }
 
 #btn-reload        { margin-top: 20px; }
 #btn-ignore        { margin-top: 10px; }
@@ -242,4 +247,102 @@ input, #select-backup {
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50%      { opacity: 0.7; }
+}
+
+/* =========================================
+   5. Backups
+   ========================================= */
+.backup-list-item {
+    background: #333; 
+    margin-bottom: 5px; 
+    padding: 10px; 
+    border-radius: 4px; 
+    border: 1px solid #444;
+}
+
+.backup-item-header {
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center;
+}
+
+.backup-title {
+    font-weight:bold; 
+    color:#f1f1f1;
+}
+
+.backup-size {
+    color:#aaa; 
+    font-weight:normal;
+}
+
+.btn-sm {
+    color:white; 
+    border:none; 
+    padding:6px 12px; 
+    cursor:pointer; 
+    border-radius:4px; 
+    font-size: 0.8em; 
+    margin-right: 5px;
+    font-weight: bold;
+}
+
+.tree-container {
+    margin-top: 10px; 
+    padding-left: 10px; 
+    border-left: 1px solid #555;
+}
+
+.tree-list {
+    list-style: none;
+    padding-left: 15px;
+    margin-top: 5px;
+}
+
+.tree-folder {
+    padding: 3px 0;
+}
+
+.tree-folder-header {
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center;
+}
+
+.tree-children {
+    margin-top: 5px;
+    padding-left: 15px;
+    border-left: 1px dashed #555;
+}
+
+.tree-folder-name {
+    cursor: pointer; 
+    color: #f3ff4d;
+    flex: 1;
+}
+
+.tree-file {
+    padding: 3px 0; 
+    display: flex; 
+    justify-content: space-between;
+    align-items: center;
+    border-radius: 4px;
+}
+
+.tree-file:hover, .tree-folder-header:hover {
+    background: #444;
+}
+
+.tree-file-name {
+    color: #ccc;
+}
+
+.btn-outline {
+    cursor: pointer; 
+    padding: 6px 12px; 
+    font-size: 0.7em; 
+    border-radius: 5px;
+    font-weight: bold;
+    border: none;
+    color: white;
 }

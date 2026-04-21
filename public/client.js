@@ -23,15 +23,14 @@ const term = new Terminal({
         foreground: '#f8f8f2', // Texto padrão (quase branco)
         cursor: '#50fa7b',     // Cursor piscando em verde neon
         cursorAccent: '#1e1e1e',
-        selectionBackground: '#44475a', // Fundo quando o usuário seleciona texto
-        // Paleta de cores ANSI (Usada por comandos como 'ls', 'grep', 'htop')
+        selectionBackground: '#44475a',
         black: '#21222c',
-        red: '#ff5555',        // Vermelho vibrante
-        green: '#50fa7b',      // Verde neon
-        yellow: '#f1fa8c',     // Amarelo suave
-        blue: '#bd93f9',       // Roxo/Azul (Dracula style)
-        magenta: '#ff79c6',    // Rosa neon
-        cyan: '#8be9fd',       // Ciano brilhante
+        red: '#ff5555',
+        green: '#50fa7b',
+        yellow: '#f1fa8c',
+        blue: '#bd93f9',
+        magenta: '#ff79c6',    
+        cyan: '#8be9fd',       
         white: '#f8f8f2',
         brightBlack: '#6272a4',
         brightRed: '#ff6e6e',
@@ -93,8 +92,17 @@ if (downloadListContainer) {
         } else if (action === 'delete') {
             deleteFile(fileName);
         } else if (action === 'toggle-folder') {
-            const nextDiv = target.parentElement.nextElementSibling;
-            nextDiv.style.display = nextDiv.style.display === 'none' ? 'block' : 'none';
+            const parentLi = target.closest('.tree-folder');
+            const childContainer = parentLi.querySelector('.tree-children');
+            
+            if (childContainer) {
+                const isHidden = childContainer.style.display === 'none';
+                childContainer.style.display = isHidden ? 'block' : 'none';
+                
+                target.innerText = isHidden 
+                    ? target.innerText.replace('▶', '▼') 
+                    : target.innerText.replace('▼', '▶');
+            }
         }
     });
 }
@@ -141,30 +149,30 @@ async function loadDownloadList() {
                 const downloadLink = `/api/download?fileName=${encodeURIComponent(rawName)}`;
 
                 const li = document.createElement('li');
-                li.style.cssText = "background: #333; margin-bottom: 5px; padding: 10px; border-radius: 4px; border: 1px solid #444;";
+                li.classList.add('backup-list-item');
                 
                 li.innerHTML = `
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-weight:bold; color:#f1f1f1;">📦 ${cleanName} <small style="color:#aaa; font-weight:normal;">(${sizeMB} MB)</small></span>
+                    <div class="backup-item-header">
+                        <span class="backup-title">📦 ${cleanName} <small class="backup-size">(${sizeMB} MB)</small></span>
                         
                         <div>
-                            <button data-action="navigate" data-file="${rawName}"                      style="background:#17a2b8; color:white; border:none; padding:6px 12px; cursor:pointer; border-radius:4px; font-size: 0.8em; margin-right: 5px;">
+                            <button data-action="navigate" data-file="${rawName}" class="btn-sm btn-info">
                                 📂 Navegar
                             </button>
 
-                            <a href="${downloadLink}" target="_blank" style="text-decoration:none; margin-right: 5px;">
-                                <button style="background:#007bff; color:white; border:none; padding:6px 12px; cursor:pointer; border-radius:4px; font-size: 0.8em; font-weight:bold;">
+                            <a href="${downloadLink}" target="_blank" style="text-decoration:none;">
+                                <button class="btn-sm btn-download">
                                     ⬇️ Baixar
                                 </button>
                             </a>
 
-                            <button data-action="delete" data-file="${file.name}" style="background:#dc3545; color:white; border:none; padding:6px 12px; cursor:pointer; border-radius:4px; font-size: 0.8em;">
+                            <button data-action="delete" data-file="${file.name}" class="btn-sm btn-danger" style="margin-right: 0;">
                                 🗑️ Apagar
                             </button>
                         </div>
                     </div>
                     
-                    <div id="tree-container-${cleanName}" style="display:none; margin-top:10px; padding-left:10px; border-left:1px solid #555;">
+                    <div id="tree-container-${cleanName}" class="tree-container" style="display:none;">
                         <small style="color:#aaa">Carregando...</small>
                     </div>
                 `;
@@ -220,9 +228,7 @@ function drawTree(container, allFiles, backupName) {
 
 function renderTreeLevel(allFiles, currentPrefix, backupName) {
     const ul = document.createElement('ul');
-    ul.style.listStyle = 'none';
-    ul.style.paddingLeft = '15px';
-    ul.style.marginTop = '5px';
+    ul.classList.add('tree-list');
 
     let folders = new Set();
     let files = [];
@@ -244,20 +250,23 @@ function renderTreeLevel(allFiles, currentPrefix, backupName) {
 
     folders.forEach(folderName => {
         const li = document.createElement('li');
+        li.classList.add('tree-folder')
+
         const newPrefix = currentPrefix + folderName + '/';
         const linkZip = `/api/backups/download-folder?backupName=${backupName}&folder=${encodeURIComponent(newPrefix)}`;
 
         li.innerHTML = `
-            <div style="padding:3px 0; display:flex; justify-content:space-between; align-items:center;">
-                <span style="cursor:pointer; color: #f3ff4dff; flex:1;" onclick="this.parentElement.nextElementSibling.style.display = (this.parentElement.nextElementSibling.style.display === 'none' ? 'block' : 'none');">
+            <div class="tree-folder-header">
+                <span data-action="toggle-folder" class="tree-folder-name">
                     ▶ 📁 ${folderName}
                 </span>
                 <a href="${linkZip}" target="_blank" onclick="event.stopPropagation()">
-                    <button style="background:none; border:2px solid #4db8ff; color:#4db8ff; cursor:pointer; padding:6px 12px; font-size:0.7em; border-radius:5px;">⬇️ .ZIP</button>
+                    <button class="btn-outline">⬇️ .ZIP</button>
                 </a>
             </div>
         `;
         const childDiv = document.createElement('div');
+        childDiv.classList.add('tree-children');
         childDiv.style.display = 'none';
         childDiv.appendChild(renderTreeLevel(allFiles, newPrefix, backupName));
         li.appendChild(childDiv);
@@ -266,12 +275,13 @@ function renderTreeLevel(allFiles, currentPrefix, backupName) {
 
     files.forEach(file => {
         const li = document.createElement('li');
-        li.style.cssText = "padding:3px 0; display:flex; justify-content:space-between; border-bottom:1px dashed #444; align-items:center;";
+        li.classList.add('tree-file');
+
         const link = `/api/backups/download-single?backupName=${backupName}&file=${encodeURIComponent(file.name)}`;
         li.innerHTML = `
-            <span style="color:#ccc;">📄 ${file.shortName}</span>
+            <span class="tree-file-name">📄 ${file.shortName}</span>
             <a href="${link}" target="_blank">
-                <button style="background:none; border:2px solid #4db8ff; color:#4db8ff; cursor:pointer; padding:6px 12px; font-size:0.7em; border-radius:5px;">⬇️ ARQUIVO</button>
+                <button class="btn-outline">⬇️ ARQUIVO</button>
             </a>
         `;
         ul.appendChild(li);
