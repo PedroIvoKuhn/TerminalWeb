@@ -1,15 +1,25 @@
-/* public/css/global.css */
+:root {
+    --azul: rgb(0, 145, 255);
+    --azul-contraste: rgb(30, 110, 244);
+    --azul-petroleo: rgb(0,195,208);
+    --azul-petroleo-contraste: rgb(0,129,152);
+    --vermelho: rgb(255, 56, 60);
+    --vermelho-contraste: rgb(233, 21, 45);
+    --verde: rgb(48, 209, 88);
+    --verde-contraste: rgb(0, 137, 50);
+    --laranja: rgb(255, 146, 48);
+    --cinza: rgb(124,124,128);
+    --cor-terminal: #1e1e1e;
+    --cinza-borda: #444;
+    --cinza-destaque: #333;
+}
 
 body {
     background-color: #2d2d2d;
     color: #f1f1f1;
     padding: 20px;
     font-family: sans-serif;
-    margin: 0; /* É sempre bom zerar a margem padrão do navegador */
-}
-
-h1 {
-    margin-top: 60px;
+    margin: 0;
 }
 
 nav {

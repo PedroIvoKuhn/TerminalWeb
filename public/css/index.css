@@ -1,102 +1,80 @@
-body {
-    background-color: #2d2d2d; 
-    color: #f1f1f1; 
-    padding: 20px; 
-    font-family: sans-serif;
-}
-
-#timer-bar {
-    display: none; 
-    align-items: center;
-    gap: 15px;
-    font-weight: bold;
-    padding: 4px;
-    border-radius: 8px;
-}
-
-.btn-danger {
-    background-color: #c0392b;
+/* =========================================
+   1. BOTÕES (Estilos Globais e Agrupados)
+   ========================================= */
+/* Base compartilhada para TODOS os botões da aplicação */
+.btn-danger, .btn-extend-24h, .init-terminal, #btn-extend, #btn-ignore, 
+#btn-reload, #btn-salvar-novo, #btn-salvar-atual {
     color: white;
     border: none;
-    padding: 8px 12px;
     border-radius: 4px;
-    font-weight: bold;
     cursor: pointer;
-    transition: background 0.3s;
-}
-
-.btn-danger:hover {
-    background-color: #e74c3c;
-}
-
-.btn-extend-24h {
-    background-color: #3498db;
-    color: white;
-    border: none;
-    padding: 8px 12px;
-    border-radius: 4px;
     font-weight: bold;
-    cursor: pointer;
-    transition: background 0.3s;
+    transition: background 0.3s; 
 }
 
-.btn-extend-24h:hover {
-    background-color: #34acdb;
+/* Tamanhos e Paddings específicos */
+.btn-danger, .btn-extend-24h { padding: 8px 12px; }
+#btn-salvar-novo             { padding: 8px 15px; }
+#btn-salvar-atual            { padding: 6px 15px; }
+#btn-extend, #btn-ignore, #btn-reload {
+    padding: 10px 20px;
+    font-size: 1rem;
 }
 
-.btn-extend-24h:disabled {
-    background-color: gray;
-    cursor: not-allowed;
+/* Cores e Estados (Hover / Disabled) */
+.btn-danger, #btn-ignore        { background-color: var(--vermelho); } 
+.btn-danger:hover, #btn-ignore:hover  { background-color: var(--vermelho-contraste); }
+
+.btn-extend-24h, #btn-reload, .init-terminal { background: var(--azul); }
+.btn-extend-24h:hover, .init-terminal:hover        { background: var(--azul-contraste); }
+.btn-extend-24h:disabled     { background-color: var(--cinza); cursor: not-allowed; }
+
+#btn-extend, #btn-salvar-novo { 
+    background: var(--verde); 
+    margin-right: 10px; 
 }
 
-#terminal-container {
-    display: none;
-    margin-top: 50px;
+#btn-extend:hover, #btn-salvar-novo:hover {
+    background: var(--verde-contraste);
 }
 
-#terminal {
-    width: 100%;
-    height: 80vh;
-}
+#btn-salvar-atual  { background: var(--azul-petroleo); }
+#btn-salvar-atual:hover  { background: var(--azul-petroleo-contraste); }
 
-#setup-container {
-    padding: 30px;
-    background-color: #1e1e1e;
-    border-radius: 8px;
-    text-align: center;
-}
+#btn-reload        { margin-top: 20px; }
+#btn-ignore        { margin-top: 10px; }
 
-input {
-    padding: 10px;
-    margin-right: 10px;
-}
-
+/* Botões genéricos sem classe */
 button {
     padding: 10px 20px;
     cursor: pointer;
 }
 
-/* --- NOVO ESTILO PARA A LISTA --- */
-#machine-list {
-    list-style: none; 
-    padding: 0; 
-    margin: 10px 0 0 0; 
-    display: flex; 
-    flex-wrap: wrap; 
-    gap: 10px;
+/* =========================================
+   2. CONTAINERS E PAINEIS
+   ========================================= */
+/* Base compartilhada para os blocos de informação */
+#machine-info, #backup-ui {
+    width: 50%; 
+    box-sizing: border-box;
+    margin: 15px 0; 
+    background: var(--cor-terminal); 
+    padding: 15px; 
+    border-radius: 8px; 
+    border: 1px solid var(--cinza-borda);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
 }
 
-#machine-list li {
-    width: 90px; 
-    height: 60px; 
-    background: #2d2d2d;     
-    border: 1px solid #444;  
-    border-radius: 6px; 
-    display: flex; 
-    align-items: center; 
-    justify-content: center; 
-    color: white; 
-    font-size: 0.85em;
+#backup-ui { display: none; }
+
+#setup-container {
+    margin-top: 70px;
+    padding: 30px;
+    background-color: var(--cor-terminal);
+    border-radius: 8px;
+    text-align: center;
+    border: 1px solid var(--cinza-borda);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
 }
 
 #container-principal {
@@ -106,113 +84,96 @@ button {
     gap: 10px;
 }
 
-#machine-info, #backup-ui { 
-    width: 50%; 
+#terminal-container {
+    display: none;
+    margin-top: 50px;
+}
+
+#terminal-wrapper {
+    width: 100%;
+    height: 80vh;
+    background-color: var(--cor-terminal);
+    padding: 15px;             
+    
+    border-radius: 12px;
+    border: 1px solid var(--cinza-borda);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
     box-sizing: border-box;
 }
 
-.timer-critical {
-    background-color: #c0392b !important;
-    animation: pulse 1s infinite;
-    padding: 4px 12px;
+#terminal {
+    width: 100%;
+    height: 100%;
+}
+
+.xterm .xterm-viewport {
+    overflow: hidden;
     border-radius: 4px;
 }
 
-@keyframes pulse {
-    0% {
-        opacity: 1;
-    }
-
-    50% {
-        opacity: 0.7;
-    }
-
-    100% {
-        opacity: 1;
-    }
+#area-salvar-atual {
+    display: none; 
+    margin-bottom: 15px; 
+    background: var(--cinza-destaque); 
+    padding: 10px; 
+    border-radius: 4px; 
+    align-items: center; 
+    justify-content: space-between;
 }
 
+/* =========================================
+   3. MODAIS
+   ========================================= */
 #session-modal, #expired-modal {
     display: none; 
     position: fixed; 
-    top: 0; 
-    left: 0; 
-    width: 100%; 
-    height: 100%; 
+    top: 0; left: 0; 
+    width: 100%; height: 100%; 
     background: rgba(0,0,0,0.8); 
     z-index: 1000; 
     justify-content: center; 
     align-items: center;
 }
 
-.session-content, .expired-content{
-    background: #333;
+.session-content, .expired-content {
+    background: var(--cinza-destaque);
     padding: 30px; 
     border-radius: 8px; 
     text-align: center; 
-    border: 2px solid #f39c12; 
+    border: 2px solid var(--laranja); 
     max-width: 400px; 
     color: white;
 }
 
-.session-content h2,
-.expired-content h2 {
-    color: #f39c12;
+.session-content h2, .expired-content h2 {
+    color: var(--laranja);
 }
 
 .session-content:last-child {
     margin-top: 20px;
 }
 
-#btn-extend {
-    background: #27ae60; 
-    color: white; 
-    padding: 10px 20px; 
-    border: none; 
-    cursor: pointer; 
-    border-radius: 4px; 
-    margin-right: 10px; 
-    font-size: 1rem;
+/* =========================================
+   4. COMPONENTES MENORES (Inputs, Listas, Timers)
+   ========================================= */
+input, #select-backup {
+    padding: 10px;
+    font-weight: 500;
+    margin-right: 10px;
+    border-radius: 4px;
+    border: none;
 }
 
-#btn-ignore {
-    background: #e74c3c; 
-    color: white; 
-    padding: 10px 20px; 
-    margin-top: 10px;
-    border: none; 
-    cursor: pointer; 
-    border-radius: 4px; 
-    font-size: 1rem;
-}
-
-#btn-reload {
-    background: #3498db; 
-    color: white; 
-    padding: 10px 20px; 
-    border: none; 
-    cursor: pointer; 
-    border-radius: 4px; 
-    margin-top: 20px; 
-    font-size: 1rem;
-}
-
-#btn-salvar-novo {
-    background: #28a745; 
-    color: white; 
-    border: none; 
-    padding: 8px 15px; 
-    cursor: pointer; 
-    border-radius: 4px; 
-    font-weight: bold;
+#select-backup {
+    cursor: pointer;
 }
 
 #nome-backup {
-    flex:1;
+    flex: 1;
     padding: 8px; 
     border-radius: 4px; 
-    border: 1px solid #555; 
-    background: #222; 
+    border: 1px solid var(--cinza-borda); 
+    background: #111; 
     color: white;
 }
 
@@ -221,34 +182,14 @@ button {
     gap: 10px;
 }
 
-#btn-salvar-atual {
-    background: #17a2b8; 
-    color: white; 
-    border: none; 
-    padding: 6px 15px; 
-    cursor: pointer; 
-    border-radius: 4px; 
-    font-weight: bold;
-}
-
-#area-salvar-atual{
-    display:none; 
-    margin-bottom: 15px; 
-    background: #333; 
-    padding: 10px; 
-    border-radius: 4px; 
-    border-left: 4px solid #17a2b8; 
-    align-items: center; 
-    justify-content: space-between;
-}
-
-#status-cota {
-    color: #aaa; 
-    background: #222; 
-    padding: 5px 10px; 
-    border-radius: 15px; 
-    border: 1px solid #444; 
-    font-size: 0.85em;
+/* Lista de Máquinas */
+#machine-list {
+    list-style: none; 
+    padding: 0; 
+    margin: 10px 0 0 0; 
+    display: flex; 
+    flex-wrap: wrap; 
+    gap: 10px;
 }
 
 #download-list {
@@ -256,38 +197,13 @@ button {
     padding: 0;
 }
 
-.my-files {
-    font-size: 1rem; 
-    color: #ddd;   
-}
+.my-files { font-size: 1rem; color: #ddd; }
 
 .files {
     margin-top: 20px; 
-    border-top: 1px solid #444; 
+    border-top: 1px solid var(--cinza-borda); 
     padding-top: 10px; 
     text-align: left;
-}
-
-#select-backup {
-    padding: 10px; 
-    margin-right: 10px;
-}
-
-#machine-info {
-    margin: 15px 0; 
-    background: #2d2d2d; 
-    padding: 15px; 
-    border-radius: 8px; 
-    border: 1px solid #444;
-}
-
-#backup-ui {
-    display:none; 
-    margin: 15px 0; 
-    background: #2d2d2d; 
-    padding: 15px; 
-    border-radius: 8px; 
-    border: 1px solid #444;  
 }
 
 .backup-container {
@@ -295,4 +211,35 @@ button {
     justify-content: space-between; 
     align-items: center; 
     margin-bottom: 15px;  
+}
+
+#status-cota {
+    color: #aaa; 
+    background: #222; 
+    padding: 5px 10px; 
+    border-radius: 15px; 
+    border: 1px solid var(--cinza-borda); 
+    font-size: 0.85em;
+}
+
+/* Lógica do Temporizador */
+#timer-bar {
+    display: none; 
+    align-items: center;
+    gap: 15px;
+    font-weight: bold;
+    padding: 4px;
+    border-radius: 8px;
+}
+
+.timer-critical {
+    background-color: var(--vermelho) !important;
+    animation: pulse 1s infinite;
+    padding: 4px 12px;
+    border-radius: 4px;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.7; }
 }

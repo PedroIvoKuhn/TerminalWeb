@@ -17,8 +17,30 @@ let cacheArquivos = {};
 // --- Configuração do Terminal ---
 const term = new Terminal({
     cursorBlink: true,
+    fontFamily: '"Fira Code", "Cascadia Code", Consolas, monospace', // Fontes modernas de código
     theme: {
-        background: '#1e1e1e'
+        background: '#1e1e1e', // Fundo que combina com seu CSS
+        foreground: '#f8f8f2', // Texto padrão (quase branco)
+        cursor: '#50fa7b',     // Cursor piscando em verde neon
+        cursorAccent: '#1e1e1e',
+        selectionBackground: '#44475a', // Fundo quando o usuário seleciona texto
+        // Paleta de cores ANSI (Usada por comandos como 'ls', 'grep', 'htop')
+        black: '#21222c',
+        red: '#ff5555',        // Vermelho vibrante
+        green: '#50fa7b',      // Verde neon
+        yellow: '#f1fa8c',     // Amarelo suave
+        blue: '#bd93f9',       // Roxo/Azul (Dracula style)
+        magenta: '#ff79c6',    // Rosa neon
+        cyan: '#8be9fd',       // Ciano brilhante
+        white: '#f8f8f2',
+        brightBlack: '#6272a4',
+        brightRed: '#ff6e6e',
+        brightGreen: '#69ff94',
+        brightYellow: '#ffffa5',
+        brightBlue: '#d6acff',
+        brightMagenta: '#ff92df',
+        brightCyan: '#a4ffff',
+        brightWhite: '#ffffff'
     }
 });
 const fitAddon = new FitAddon.FitAddon();
