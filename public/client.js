@@ -9,7 +9,7 @@ const setupForm = document.getElementById('setup-form');
 const numMachinesInput = document.getElementById('num-machines');
 
 let myMasterPodName = null;
-let currentLoadedBackup = null;
+let currentLoadedBackup = localStorage.getItem('active_backup_name') || null;;
 const selectBackup = document.getElementById('select-backup');
 
 let cacheArquivos = {}; 
@@ -49,11 +49,13 @@ term.loadAddon(fitAddon);
 setupForm.addEventListener('submit', (e) => {
     e.preventDefault(); 
     const numMachines = parseInt(numMachinesInput.value, 10);
+    const image = document.querySelector('meta[name="image"]').getAttribute('content');
     const backupName = selectBackup.value;
     currentLoadedBackup = backupName || null;
-    const image = document.querySelector('meta[name="image"]').getAttribute('content');
+
 
     if (numMachines > 0) {
+        localStorage.setItem('active_backup_name', backupName);
         socket.emit('start-session', { numMachines: numMachines, image: image, backupName: backupName });
         initializeTerminal();
     }
@@ -341,7 +343,9 @@ async function saveFile(targetName) {
     const alreadyExists = Array.from(selectBackup.options).some(o => o.value === targetName);
 
     if (alreadyExists && targetName !== currentLoadedBackup) {
-        if(!confirm(`O arquivo "${targetName}" JÁ EXISTE! \n\nDeseja sobreescrever?`)) return;
+        const msg = `O arquivo <b>"${targetName}"</b> JÁ EXISTE!<br><br>Deseja sobreescrever?`;
+        const confirmed = await AppModal.confirm('Substituir Arquivo?', msg);
+        if (!confirmed) return;
     }
 
     try {
@@ -356,10 +360,11 @@ async function saveFile(targetName) {
         const json = await res.json();
         
         if(json.error){ 
-            alert('Erro: ' + json.error);
+            AppModal.alert('Erro', json.error);
         } else {
-            alert('Salvo com sucesso!');
+            AppModal.alert('Salvo', 'Backup salvo com sucesso!');
             currentLoadedBackup = targetName;
+            localStorage.setItem('active_backup_name', targetName);
             updateBackupUI(); 
             socket.emit('update-active-backup', targetName);
 
@@ -387,7 +392,8 @@ if(btnSaveNew) {
 
 // --- DELETAR ---
 async function deleteFile(fullName) {
-    if(!confirm('Tem certeza que deseja APAGAR este arquivo permanentemente?')) return;
+    const confirmed = await AppModal.confirm('Atenção!', 'Tem certeza que deseja APAGAR este arquivo permanentemente?');
+    if (!confirmed) return;
     
     try {
         await fetch('/api/backups', {
@@ -401,15 +407,16 @@ async function deleteFile(fullName) {
 
         if(cleanName === currentLoadedBackup) {
             currentLoadedBackup = null;
+            localStorage.removeItem('active_backup_name');
             updateBackupUI();
         }
 
         await loadBackups();
-        alert('Arquivo apagado.');
+        AppModal.alert('Sucesso', 'Arquivo apagado com sucesso.');
 
     } catch (e) {
         console.error(e);
-        alert('Erro ao tentar apagar.');
+        AppModal.alert('Erro', 'Erro ao tentar apagar.');
     }
 };
 
@@ -497,7 +504,7 @@ socket.on('session-ready', (data) => {
     });
 
     if (data.masterPodName) {
-        console.log("Pod Mestre identificado:", data.masterPodName);
+        //console.log("Pod Mestre identificado:", data.masterPodName);
         myMasterPodName = data.masterPodName;
         
         const backupUi = document.getElementById('backup-ui');
@@ -509,7 +516,7 @@ socket.on('session-ready', (data) => {
     }
 
     setTimeout(() => {
-        console.log("Terminal sincronizando dimensões:", term.cols, term.rows);
+        //console.log("Terminal sincronizando dimensões:", term.cols, term.rows);
         fitAddon.fit();
         socket.emit('resize', { cols: term.cols, rows: term.rows });
     }, 500);
@@ -542,6 +549,7 @@ socket.on('session:expired', () => {
     clearInterval(countdownInterval);
     timerBar.style.display = 'none';
     localStorage.removeItem("jobId");
+    localStorage.removeItem('active_backup_name');
     document.getElementById('expired-modal').style.display = 'flex';
 });
 
@@ -581,3 +589,54 @@ if(jobId) {
     machine: targetMachine,
   });
 }
+
+// --- CONTROLADOR DE MODAL DINÂMICO ---
+const AppModal = {
+    // Retorna uma Promise que resolve 'true' (Confirmar) ou 'false' (Cancelar)
+    show: function({ title, message, type = 'alert', confirmText = 'OK', cancelText = 'Cancelar' }) {
+        return new Promise((resolve) => {
+            const modal = document.getElementById('custom-modal');
+            const elTitle = document.getElementById('custom-modal-title');
+            const elMessage = document.getElementById('custom-modal-message');
+            const btnConfirm = document.getElementById('custom-modal-confirm');
+            const btnCancel = document.getElementById('custom-modal-cancel');
+
+            // Preenche os textos
+            elTitle.textContent = title;
+            elMessage.innerHTML = message; // Usamos innerHTML caso queira mandar uma quebra de linha <br>
+            btnConfirm.textContent = confirmText;
+            btnCancel.textContent = cancelText;
+
+            // Ajusta os botões dependendo se é Alert ou Confirm
+            if (type === 'confirm') {
+                btnCancel.style.display = 'block';
+            } else {
+                btnCancel.style.display = 'none';
+            }
+
+            // Exibe o modal
+            modal.style.display = 'flex';
+
+            // Função para limpar os eventos antigos para não acumularem
+            const cleanup = () => {
+                modal.style.display = 'none';
+                btnConfirm.onclick = null;
+                btnCancel.onclick = null;
+            };
+
+            // Eventos de clique
+            btnConfirm.onclick = () => {
+                cleanup();
+                resolve(true);
+            };
+
+            btnCancel.onclick = () => {
+                cleanup();
+                resolve(false);
+            };
+        });
+    },
+
+    alert: (title, message) => AppModal.show({ title, message, type: 'alert' }),
+    confirm: (title, message) => AppModal.show({ title, message, type: 'confirm', confirmText: 'Sim', cancelText: 'Não' })
+};

@@ -83,8 +83,9 @@
                 </div>
             </div>
         </div>
-    <div id="terminal-wrapper">
-        <div id="terminal"></div>
+        <div id="terminal-wrapper">
+            <div id="terminal"></div>
+        </div>
     </div>
 
     <div id="session-modal">
@@ -107,9 +108,21 @@
         <div class="expired-content">
             <h2>⚠️ Sessão Encerrada!</h2>
             <p>A sua sessão chegou ao fim.</p>
-            <button id="btn-reload">
+            <button id="btn-reload" class="btn-primary">
                 Voltar ao Início
             </button>
+        </div>
+    </div>
+
+    <div id="custom-modal">
+        <div class="custom-modal-content">
+            <h2 id="custom-modal-title">Título</h2>
+            <p id="custom-modal-message" style="margin: 20px 0; color: #ccc; line-height: 1.5;"></p>
+        
+            <div style="display: flex; justify-content: center; gap: 15px; margin-top: 20px;">
+                <button id="custom-modal-cancel" class="btn-danger" style="display: none;">Cancelar</button>
+                <button id="custom-modal-confirm" class="btn-primary">OK</button>
+            </div>
         </div>
     </div>
 

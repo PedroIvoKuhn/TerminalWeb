@@ -12,6 +12,7 @@
     --cor-terminal: #1e1e1e;
     --cinza-borda: #444;
     --cinza-destaque: #333;
+    --cinza-claro: rgb(242,242,244);
 }
 
 body {

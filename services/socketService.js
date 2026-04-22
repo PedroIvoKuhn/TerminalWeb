@@ -109,7 +109,8 @@ module.exports = (io) => {
                 
                 socket.emit('session-ready', { 
                     aliases: machineAliases,
-                    jobId: jobId 
+                    jobId: jobId,
+                    masterPodName: `master-${jobId}` 
                 });
 
                 if (!machineAliases.includes(requestedMachine)) {

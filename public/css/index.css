@@ -3,7 +3,7 @@
    ========================================= */
 /* Base compartilhada para TODOS os botões da aplicação */
 .btn-danger, .btn-extend-24h, .init-terminal, #btn-extend, #btn-ignore, 
-#btn-reload, #btn-salvar-novo, #btn-salvar-atual {
+#btn-reload, #btn-salvar-novo, #btn-salvar-atual, .btn-primary, .btn-machine {
     color: white;
     border: none;
     border-radius: 4px;
@@ -16,7 +16,7 @@
 .btn-danger, .btn-extend-24h { padding: 8px 12px; }
 #btn-salvar-novo             { padding: 8px 15px; }
 #btn-salvar-atual            { padding: 6px 15px; }
-#btn-extend, #btn-ignore, #btn-reload {
+#btn-extend, #btn-ignore, #btn-reload, .btn-primary, #custom-modal-cancel {
     padding: 10px 20px;
     font-size: 1rem;
 }
@@ -25,14 +25,30 @@
 .btn-danger, #btn-ignore        { background-color: var(--vermelho); } 
 .btn-danger:hover, #btn-ignore:hover  { background-color: var(--vermelho-contraste); }
 
-.btn-extend-24h, #btn-reload, .init-terminal, .btn-download, .btn-outline { 
+.btn-extend-24h, .init-terminal, .btn-download, .btn-outline, .btn-primary { 
     background: var(--azul); 
 }
 
-.btn-extend-24h:hover, .init-terminal:hover, .btn-download:hover, .btn-outline:hover { 
+.btn-extend-24h:hover, .init-terminal:hover, .btn-download:hover, .btn-outline:hover, .btn-primary:hover { 
     background: var(--azul-contraste); 
 }
 .btn-extend-24h:disabled     { background-color: var(--cinza); cursor: not-allowed; }
+
+.btn-machine { 
+    background: var(--cinza-claro); 
+    color: black;
+    font-weight: 200; 
+}
+
+.btn-machine:hover { 
+    background: var(--cinza);
+}
+
+.btn-machine:disabled { 
+    background: var(--cinza-destaque); 
+}
+
+
 
 #btn-extend, #btn-salvar-novo { 
     background: var(--verde); 
@@ -129,7 +145,7 @@ button {
 /* =========================================
    3. MODAIS
    ========================================= */
-#session-modal, #expired-modal {
+#session-modal, #expired-modal, #custom-modal {
     display: none; 
     position: fixed; 
     top: 0; left: 0; 
@@ -140,7 +156,7 @@ button {
     align-items: center;
 }
 
-.session-content, .expired-content {
+.session-content, .expired-content, .custom-modal-content {
     background: var(--cinza-destaque);
     padding: 30px; 
     border-radius: 8px; 
@@ -150,7 +166,7 @@ button {
     color: white;
 }
 
-.session-content h2, .expired-content h2 {
+.session-content h2, .expired-content h2, .custom-modal-content h2 {
     color: var(--laranja);
 }
 
