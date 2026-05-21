@@ -136,7 +136,17 @@ async function createClusterResources(clusterInfo) {
                 containers: [{
                     name: 'container',
                     image: image,
-                    imagePullPolicy: 'IfNotPresent',
+                    imagePullPolicy: 'Always',
+                    resources: {
+                        requests: {
+                            cpu: '200m',
+                            memory: '256Mi'
+                        },
+                        limits: {
+                            cpu: '1000m',
+                            memory: '1536Mi'
+                        }
+                    },
                     volumeMounts: [
                         {
                             name: 'ssh-keys-volume',
