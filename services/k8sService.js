@@ -24,7 +24,7 @@ function generateSshConfig(numMachines, jobId, masterPodName, serviceName) {
         const isMaster = i === 0;
         const alias = isMaster ? 'master' : `worker-${i}`;
         const fqdn = `${alias}.${serviceName}.${namespace}.svc.cluster.local`;
-        sshConfig += `Host ${alias}\n    HostName ${fqdn}\n    User user\n\n`;
+        sshConfig += `Host ${alias}\n    HostName ${fqdn}\n    User aluno\n\n`;
     }
     sshConfig += `Host *\n    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null\n`;
     return sshConfig;
@@ -140,22 +140,22 @@ async function createClusterResources(clusterInfo) {
                     volumeMounts: [
                         {
                             name: 'ssh-keys-volume',
-                            mountPath: '/home/user/.ssh/id_rsa',
+                            mountPath: '/home/aluno/.ssh/id_rsa',
                             subPath: 'id_rsa'
                         },
                         {
                             name: 'ssh-keys-volume',
-                            mountPath: '/home/user/.ssh/id_rsa.pub',
+                            mountPath: '/home/aluno/.ssh/id_rsa.pub',
                             subPath: 'id_rsa.pub'
                         },
                         {
                             name: 'ssh-keys-volume',
-                            mountPath: '/home/user/.ssh/authorized_keys',
+                            mountPath: '/home/aluno/.ssh/authorized_keys',
                             subPath: 'authorized_keys'
                         },
                         {
                             name: 'ssh-keys-volume',
-                            mountPath: '/home/user/.ssh/config',
+                            mountPath: '/home/aluno/.ssh/config',
                             subPath: 'config'
                         }
                     ]

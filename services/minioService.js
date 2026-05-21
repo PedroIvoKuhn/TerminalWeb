@@ -67,8 +67,8 @@ async function restoreBackup(userId, podName, fileName) {
 
     const pathNoBucket = `aluno_${userId}/${finalName}`;
     
-    // Restauramos direto na raiz (/home/user)
-    const command = ['tar', 'xzf', '-', '-C', '/home/user'];
+    // Restauramos direto na raiz (/home/aluno)
+    const command = ['tar', 'xzf', '-', '-C', '/home/aluno'];
 
     try {
         const dataStream = await minioClient.getObject(BUCKET_NAME, pathNoBucket);
@@ -110,7 +110,7 @@ async function saveBackup(userId, podName, fileName) {
 
     const command = [
         'tar', 'czf', '-', 
-        '-C', '/home/user', 
+        '-C', '/home/aluno', 
         '--exclude=*.tar.gz',
         '--exclude=.ssh',
         '.'

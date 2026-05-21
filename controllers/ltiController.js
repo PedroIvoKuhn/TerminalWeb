@@ -87,10 +87,19 @@ async function setup(app) {
     lti.onInvalidToken(async (req, res, next) => {
     console.warn(`[LTI] Tentativa de acesso bloqueada (Token Inválido ou Acesso Direto).`);
     
-    // Mostra a sua página bonitona de erro!
     const unauthorizedPath = path.join(__dirname, '../views', 'unauthorized.html');
     return res.status(401).sendFile(unauthorizedPath);
-});
+    });
+
+    lti.app.get('/', (req, res) => {
+        const home = path.join(__dirname, "../views", 'index.html');
+        res.sendFile(home)
+    });
+
+    lti.app.get('/documentation', (req, res) => {
+        const documentationPath = path.join(__dirname, '../views', 'documentation.html');
+        res.sendFile(documentationPath);
+    });
 }
 
 module.exports = { setup };
