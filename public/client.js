@@ -740,9 +740,12 @@ if (btnBursting) {
             return;
         }
 
+        const imageMeta = document.querySelector('meta[name="image"]');
+        const activeImage = imageMeta ? imageMeta.getAttribute('content') : null;
+
         resetBurstModal();
         if (burstModal) burstModal.style.display = 'flex';
-        socket.emit('burst:start');
+        socket.emit('burst:start', { image: activeImage });
     });
 }
 

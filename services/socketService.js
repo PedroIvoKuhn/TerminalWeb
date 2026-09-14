@@ -41,6 +41,8 @@ module.exports = (io) => {
                 const expiresAt = sessionService.startSession(jobId, socket, numMachines, currentUserId, backupName);
                 socket.emit('session:update', { expiresAt: expiresAt });
 
+                const hasDedicatedNode = sessionService.hasBurstNodes(jobId);
+
                 // Criar a infraestrutura
                 const clusterInfo = {
                     jobId, 
@@ -50,6 +52,7 @@ module.exports = (io) => {
                     expiresAt,
                     userId: currentUserId,
                     activeBackupName: backupName,
+                    hasDedicatedNode,
                 };
                 const { masterPodName } = await k8sService.createClusterResources(clusterInfo);
                 socket.emit('output', `Pods criados. Aguardando o nó mestre ficar pronto...\r\n`);
@@ -148,8 +151,8 @@ module.exports = (io) => {
             socket.emit('burst:info', { provider });
         });
 
-        socket.on('burst:start', async () => {
-            await handleSessionBurst(socket);
+        socket.on('burst:start', async (data) => {
+            await handleSessionBurst(socket, data);
         });
 
         socket.on("disconnect", async () => {
@@ -235,27 +238,30 @@ async function handlePodError(err, socket, jobId, secretName) {
     await k8sService.cleanupJob(jobId, secretName);
 }
 
-async function handleSessionBurst(socket) {
+async function handleSessionBurst(socket, data = {}) {
     if (socket.data.isBursting) {
         socket.emit('burst:step', { step: 1, message: 'Operação de bursting já está em andamento.' });
         return;
     }
 
     const provider = (process.env.CLOUD_PROVIDER || 'AWS').toUpperCase();
+    const imageToPreload = (data && data.image) || process.env.DEFAULT_MPI_IMAGE;
     socket.data.isBursting = true;
     socket.data.burstCancelled = false;
 
     let pendingBurstInfo = null;
 
     try {
-        console.log(`[Socket ${socket.id}] Iniciando solicitação de Cloud Bursting para ${provider}...`);
+        console.log(`[Socket ${socket.id}] Iniciando solicitação de Cloud Bursting para ${provider}... (Imagem: ${imageToPreload || 'padrão'})`);
         socket.emit('burst:step', { step: 1, message: `Iniciando validação para nuvem ${provider}...` });
 
         const result = await cloudBurstingService.addNode({
             provider,
+            imageToPreload,
             tags: {
                 socketId: socket.id,
-                jobId: socket.data.jobId || `pending-${socket.id}`
+                jobId: socket.data.jobId || `pending-${socket.id}`,
+                userId: socket.data.userId
             },
             onCreated: (createdNodeId, meta = {}) => {
                 const nodeName = (meta && meta.nodeName) ? meta.nodeName : createdNodeId;

@@ -274,6 +274,16 @@ function removeSocket(jobId, socketToRemove) {
   }
 }
 
+function hasBurstNodes(jobId) {
+  const session = activeSessions[jobId];
+  return Boolean(session && session.burstNodes && session.burstNodes.length > 0);
+}
+
+function getBurstNodes(jobId) {
+  const session = activeSessions[jobId];
+  return (session && session.burstNodes) ? session.burstNodes : [];
+}
+
 module.exports = { 
     startSession, 
     extendSession, 
@@ -284,5 +294,7 @@ module.exports = {
     registerPendingBurst,
     getPendingBursts,
     cleanupPendingBurst,
-    registerBurstNode
+    registerBurstNode,
+    hasBurstNodes,
+    getBurstNodes
 };

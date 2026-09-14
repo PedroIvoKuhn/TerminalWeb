@@ -74,8 +74,9 @@ async function ensureInfrastructure(ctx) {
     });
 }
 
-function buildUserDataScript(joinCommand = '', tailscaleKey = process.env.TAILSCALE_AUTH_KEY) {
+function buildUserDataScript(joinCommand = '', tailscaleKey = process.env.TAILSCALE_AUTH_KEY, nodeName = '', imageToPreload = null) {
     const masterHost = (joinCommand.match(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/) || [])[0] || '100.90.80.70';
+    const safeImage = (imageToPreload || '').trim().replace(/[^a-zA-Z0-9_.:\/\-]/g, '');
 
     let script = `#!/bin/bash
 exec > /var/log/burst-init.log 2>&1
@@ -140,6 +141,12 @@ fi
 mkdir -p /home/ubuntu/.kube
 chown -f -R ubuntu:ubuntu /home/ubuntu/.kube || true
 
+${safeImage ? `
+# --- Pre-download antecipado da imagem Docker em background ---
+echo "--- Iniciando pre-download da imagem ${safeImage} em background ---"
+nohup microk8s crictl pull "${safeImage}" > /var/log/burst-preload.log 2>&1 &
+` : ''}
+
 # --- Executando Join com MicroK8s Master ---
 echo "--- INICIANDO JOIN COM MICROK8S ---"
 date
@@ -150,6 +157,18 @@ done
 
 echo "--- JOIN FINALIZADO ---"
 date
+
+# --- Garante que o kubelet anuncie o IP do Tailscale pos-join ---
+if [ -n "$TS_IP" ]; then
+    echo "--- Configurando --node-ip=$TS_IP pos-join ---"
+    sed -i '/--node-ip=/d' /var/snap/microk8s/current/args/kubelet 2>/dev/null || true
+    echo "--node-ip=$TS_IP" >> /var/snap/microk8s/current/args/kubelet
+    ${nodeName ? `
+    sed -i '/--hostname-override=/d' /var/snap/microk8s/current/args/kubelet 2>/dev/null || true
+    echo "--hostname-override=${nodeName}" >> /var/snap/microk8s/current/args/kubelet
+    ` : ''}
+    systemctl restart snap.microk8s.daemon-kubelet 2>/dev/null || true
+fi
 
 # --- Configuracao de DNAT e Watchdog para Kubernetes Service (${masterHost}) ---
 echo "--- Configurando regras de DNAT e Watchdog pos-join ---"
@@ -262,7 +281,7 @@ async function getOrCreatePublicIp(ctx) {
 }
 
 async function addNode(joinCommand = '', credentials = {}, options = {}) {
-    const { onProgress, tags = {}, onCreated } = options;
+    const { onProgress, tags = {}, onCreated, imageToPreload } = options;
     const ctx = getAzureContext(credentials);
 
     console.log("-> Garantindo infraestrutura básica (RG, VNet, Subnet) na Azure...");
@@ -287,7 +306,7 @@ async function addNode(joinCommand = '', credentials = {}, options = {}) {
         }]
     });
 
-    const encodedUserData = buildUserDataScript(joinCommand, credentials.tailscaleAuthKey);
+    const encodedUserData = buildUserDataScript(joinCommand, credentials.tailscaleAuthKey, nodeId, imageToPreload);
     console.log(`-> Criando Máquina Virtual: ${nodeId}...`);
     if (onProgress) onProgress(2, `Criando Máquina Virtual ${nodeId} na Azure...`);
     

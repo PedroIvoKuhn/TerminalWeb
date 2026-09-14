@@ -1,5 +1,5 @@
 const k8s = require('@kubernetes/client-node');
-const { k8sApi, namespace, kc, k8sExec } = require('../config/kubernetes');
+const { k8sApi, k8sNetworkingApi, namespace, kc, k8sExec } = require('../config/kubernetes');
 
 // --  Funções privadas
 
@@ -82,18 +82,20 @@ async function waitForPodRunning(name) {
 }
 
 async function createClusterResources(clusterInfo) {
-    const { jobId, image, keys, expiresAt, numMachines, userId, activeBackupName } = clusterInfo;
+    const { jobId, image, keys, expiresAt, numMachines, userId, activeBackupName, hasDedicatedNode } = clusterInfo;
     const masterPodName = `master-${jobId}`;
     const serviceName = `svc-${jobId}`;
     const secretName = `ssh-keys-${jobId}`;
+    const netpolName = `netpol-${jobId}`;
 
     try {
-        // Tenta deletar o secret se ele já existir (ignora erro se não existir)
+        // Tenta deletar os recursos se já existirem (ignora erro se não existir)
         await k8sApi.deleteNamespacedSecret(secretName, namespace);
         await k8sApi.deleteNamespacedService(serviceName, namespace);
+        await k8sNetworkingApi.deleteNamespacedNetworkPolicy(netpolName, namespace);
     } catch (e) {
         // Ignora erro 404 (Not Found), qualquer outro erro mostra no log
-        if (e.body && e.body.code !== 404) console.log("Aviso de limpeza:", e.body.message);
+        if (e.body && e.body.code !== 404) console.log("Aviso de limpeza prévia:", e.body ? e.body.message : e.message);
     }
 
     // Cria o secret
@@ -110,15 +112,55 @@ async function createClusterResources(clusterInfo) {
     };
     await k8sApi.createNamespacedService(namespace, serviceManifest);
 
+    // Cria a NetworkPolicy para isolamento de rede (faz com que pods de outros usuários não enxerguem estes pods)
+    const netpolManifest = {
+        apiVersion: 'networking.k8s.io/v1',
+        kind: 'NetworkPolicy',
+        metadata: {
+            name: netpolName,
+            labels: { 'job-id': jobId }
+        },
+        spec: {
+            podSelector: {
+                matchLabels: { 'job-id': jobId }
+            },
+            policyTypes: ['Ingress'],
+            ingress: [
+                {
+                    from: [
+                        {
+                            podSelector: {
+                                matchLabels: { 'job-id': jobId }
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    };
+    try {
+        await k8sNetworkingApi.createNamespacedNetworkPolicy(namespace, netpolManifest);
+        console.log(`[K8S] NetworkPolicy ${netpolName} aplicada para isolar o job ${jobId}.`);
+    } catch (netErr) {
+        console.warn(`[K8S AVISO] Erro ao criar NetworkPolicy ${netpolName}:`, netErr.body ? netErr.body.message : netErr.message);
+    }
+
     // Criar os Pods
     const podPromises = [];
+    const tenantTag = userId ? `user-${String(userId).toLowerCase().replace(/[^a-z0-9-_]/g, '-').slice(0, 63)}` : null;
+
     for (let i = 0; i < numMachines; i++) {
         const podK8sName = i === 0 ? masterPodName : `worker-${i}-${jobId}`;
         const networkHostname = i === 0 ? 'master' : `worker-${i}`;
+        const podLabels = { 'job-id': jobId, 'role': i === 0 ? 'master' : 'worker' };
+        if (tenantTag) {
+            podLabels['tenant'] = tenantTag;
+        }
+
         const podManifest = {
             metadata: {
                 name: podK8sName,
-                labels: { 'job-id': jobId, 'role': i === 0 ? 'master' : 'worker' },
+                labels: podLabels,
                 annotations: {
                   'terminalWeb/expiresAt': expiresAt.toString(),
                   'terminalWeb/numMachines': numMachines.toString(),
@@ -180,6 +222,32 @@ async function createClusterResources(clusterInfo) {
                 restartPolicy: 'Never'
             }
         };
+
+        // Se o usuário possui máquina dedicada (Cloud Bursting), isola o pod exclusivamente nela
+        if (hasDedicatedNode && tenantTag) {
+            podManifest.spec.tolerations = [
+                {
+                    key: 'tenant',
+                    operator: 'Equal',
+                    value: tenantTag,
+                    effect: 'NoSchedule'
+                }
+            ];
+            podManifest.spec.affinity = {
+                nodeAffinity: {
+                    requiredDuringSchedulingIgnoredDuringExecution: {
+                        nodeSelectorTerms: [{
+                            matchExpressions: [{
+                                key: 'tenant',
+                                operator: 'In',
+                                values: [tenantTag]
+                            }]
+                        }]
+                    }
+                }
+            };
+        }
+
         //console.log(`Criando Pod: ${podName}`);
         podPromises.push(k8sApi.createNamespacedPod(namespace, podManifest));
     }
@@ -206,6 +274,15 @@ async function cleanupJob(jobId, secretName) {
         );
         //console.log(`Deletando service svc-${jobId}`);
         await k8sApi.deleteNamespacedService(`svc-${jobId}`, namespace);
+
+        // Deletando NetworkPolicy netpol-${jobId}
+        try {
+            await k8sNetworkingApi.deleteNamespacedNetworkPolicy(`netpol-${jobId}`, namespace);
+        } catch (netErr) {
+            if (netErr.body && netErr.body.code !== 404) {
+                console.warn(`Aviso ao deletar NetworkPolicy netpol-${jobId}:`, netErr.body ? netErr.body.message : netErr.message);
+            }
+        }
         //console.log(`Limpeza para ${jobId} concluída.`);
     } catch (err) {
         if (err.body && err.body.code !== 404) {
