@@ -337,10 +337,14 @@ async function addNode(joinCommand = '', credentials = {}, options = {}) {
         await ctx.computeClient.virtualMachines.beginCreateOrUpdateAndWait(ctx.resourceGroupName, nodeId, vmParameters);
         console.log(`[SUCESSO] Instância Azure criada! ID/Nome: ${nodeId}`);
         if (onCreated) {
-            onCreated(nodeId);
+            onCreated(nodeId, { nodeName: nodeId });
         }
         if (onProgress) onProgress(3, `Instância criada (${nodeId}). Conectando via Tailscale e iniciando MicroK8s...`);
-        return nodeId;
+        return {
+            nodeId: nodeId,
+            nodeName: nodeId,
+            expectedNames: [nodeId]
+        };
     } catch (error) {
         console.error("[ERRO] Falha ao criar a instância no Azure:", error);
         // Em caso de falha na criação da VM, limpa a NIC criada para não deixar resíduo

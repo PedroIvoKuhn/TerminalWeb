@@ -257,14 +257,17 @@ async function handleSessionBurst(socket) {
                 socketId: socket.id,
                 jobId: socket.data.jobId || `pending-${socket.id}`
             },
-            onCreated: (createdNodeId) => {
+            onCreated: (createdNodeId, meta = {}) => {
+                const nodeName = (meta && meta.nodeName) ? meta.nodeName : createdNodeId;
+                const privateDns = (meta && meta.privateDns) ? meta.privateDns : null;
                 pendingBurstInfo = {
                     nodeId: createdNodeId,
-                    nodeName: createdNodeId,
+                    nodeName: nodeName,
+                    privateDnsOrHost: privateDns,
                     provider
                 };
                 sessionService.registerPendingBurst(socket.id, pendingBurstInfo);
-                console.log(`[BURST] Nó ${createdNodeId} criado e registrado como pendente para o socket ${socket.id}.`);
+                console.log(`[BURST] Nó ${createdNodeId} (${nodeName}) criado e registrado como pendente para o socket ${socket.id}.`);
 
                 // Se o socket desconectou enquanto a VM era provisionada, destrói imediatamente!
                 if (socket.disconnected || socket.data.isDisconnected) {

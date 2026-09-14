@@ -77,7 +77,7 @@ async function getLatestUbuntuAmi(client) {
     }
 }
 
-function buildUserDataScript(joinCommand = '', tailscaleKey = process.env.TAILSCALE_AUTH_KEY) {
+function buildUserDataScript(joinCommand = '', tailscaleKey = process.env.TAILSCALE_AUTH_KEY, nodeName = '') {
     const masterHost = (joinCommand.match(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/) || [])[0] || '100.90.80.70';
 
     let script = `#!/bin/bash
@@ -86,6 +86,14 @@ set -x
 
 echo "=== INICIANDO CONFIGURACAO DO BURST NODE AWS ==="
 date
+
+# Define o hostname do sistema se informado
+if [ -n "${nodeName}" ]; then
+    hostnamectl set-hostname "${nodeName}" || true
+    echo "${nodeName}" > /etc/hostname || true
+    sed -i 's/preserve_hostname: false/preserve_hostname: true/g' /etc/cloud/cloud.cfg 2>/dev/null || true
+    echo "127.0.0.1 ${nodeName}" >> /etc/hosts || true
+fi
 
 # Garante curl instalado rapidamente sem update desnecessário se já existir
 if ! command -v curl >/dev/null 2>&1; then
@@ -102,7 +110,8 @@ curl -fsSL https://tailscale.com/install.sh | sh
 `;
 
     if (tailscaleKey) {
-        script += `tailscale up --authkey=${tailscaleKey} --accept-routes --ssh\n`;
+        const tsHostnameFlag = nodeName ? ` --hostname=${nodeName}` : '';
+        script += `tailscale up --authkey=${tailscaleKey}${tsHostnameFlag} --accept-routes --ssh\n`;
         script += `
 # Aguarda IP do Tailscale ser configurado na interface
 TS_IP=""
@@ -135,11 +144,13 @@ done
 
 usermod -aG microk8s ubuntu
 
-# Configura o kubelet para anunciar o IP do Tailscale ao cluster
+# Configura o kubelet para anunciar o IP do Tailscale e hostname ao cluster
 if [ -n "$TS_IP" ]; then
     echo "Configurando --node-ip=$TS_IP no kubelet..."
     mkdir -p /var/snap/microk8s/current/args
     echo "--node-ip=$TS_IP" >> /var/snap/microk8s/current/args/kubelet
+    ${nodeName ? `echo "--hostname-override=${nodeName}" >> /var/snap/microk8s/current/args/kubelet` : ''}
+    systemctl restart snap.microk8s.daemon-kubelet 2>/dev/null || true
 fi
 
 mkdir -p /home/ubuntu/.kube
@@ -226,10 +237,11 @@ async function addNode(joinCommand = '', credentials = {}, options = {}) {
     const amiId = await getLatestUbuntuAmi(client);
     console.log(`-> AMI encontrada: ${amiId}`);
 
-    const userData = buildUserDataScript(joinCommand, credentials.tailscaleAuthKey);
+    const nodeName = `burst-node-${Date.now()}`;
+    const userData = buildUserDataScript(joinCommand, credentials.tailscaleAuthKey, nodeName);
 
     const instanceTags = [
-        { Key: 'Name', Value: `burst-node-${Date.now()}` },
+        { Key: 'Name', Value: nodeName },
         { Key: 'Role', Value: 'CloudBurstingWorker' },
         { Key: 'ManagedBy', Value: 'TerminalWeb' }
     ];
@@ -258,13 +270,22 @@ async function addNode(joinCommand = '', credentials = {}, options = {}) {
     try {
         const command = new RunInstancesCommand(params);
         const response = await client.send(command);
-        const instanceId = response.Instances[0].InstanceId;
-        console.log(`[SUCESSO] Instância criada! ID: ${instanceId}`);
+        const instance = response.Instances[0];
+        const instanceId = instance.InstanceId;
+        const privateDns = (instance.PrivateDnsName || '').split('.')[0];
+
+        console.log(`[SUCESSO] Instância criada! ID: ${instanceId} (NodeName: ${nodeName}, Hostname: ${privateDns})`);
         if (onCreated) {
-            onCreated(instanceId);
+            onCreated(instanceId, { nodeName, privateDns });
         }
-        if (onProgress) onProgress(3, `Instância criada (${instanceId}). Conectando via Tailscale e iniciando MicroK8s...`);
-        return instanceId;
+        if (onProgress) onProgress(3, `Instância criada (${nodeName} / ${instanceId}). Conectando via Tailscale e iniciando MicroK8s...`);
+
+        return {
+            nodeId: instanceId,
+            nodeName: nodeName,
+            privateDns: privateDns,
+            expectedNames: [nodeName, instanceId, privateDns].filter(Boolean)
+        };
     } catch (error) {
         console.error("[ERRO] Falha ao criar a instância:", error);
         throw error;
@@ -301,8 +322,12 @@ async function listBurstNodes(credentials = {}) {
         const instances = [];
         response.Reservations.forEach(r => {
             r.Instances.forEach(i => {
+                const nameTag = (i.Tags || []).find(t => t.Key === 'Name');
+                const jobIdTag = (i.Tags || []).find(t => t.Key === 'JobId');
                 instances.push({
                     id: i.InstanceId,
+                    name: nameTag ? nameTag.Value : i.InstanceId,
+                    jobId: jobIdTag ? jobIdTag.Value : null,
                     state: i.State.Name,
                     type: i.InstanceType,
                     launchTime: i.LaunchTime,

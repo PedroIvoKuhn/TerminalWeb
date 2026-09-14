@@ -108,9 +108,14 @@ async function generateJoinCommand() {
 /**
  * Aguarda ativamente até que o nó de burst apareça no MicroK8s
  */
-async function waitForNodeInCluster(nodePrefixOrName, timeoutMs = 420000, onProgress, isCancelled) {
+async function waitForNodeInCluster(nodePrefixOrNames, timeoutMs = 420000, onProgress, isCancelled) {
     const startTime = Date.now();
-    console.log(`[BURST] Monitorando cluster: aguardando nó '${nodePrefixOrName}' aparecer no MicroK8s (timeout: ${timeoutMs / 1000}s)...`);
+    const targets = (Array.isArray(nodePrefixOrNames) ? nodePrefixOrNames : [nodePrefixOrNames])
+        .map(t => String(t).trim().toLowerCase())
+        .filter(Boolean);
+
+    const displayName = targets[0] || 'burst-node';
+    console.log(`[BURST] Monitorando cluster: aguardando nós candidatos [${targets.join(', ')}] aparecerem no MicroK8s (timeout: ${timeoutMs / 1000}s)...`);
 
     let sawInTailscale = false;
     let calicoRestartTriggered = false;
@@ -118,7 +123,7 @@ async function waitForNodeInCluster(nodePrefixOrName, timeoutMs = 420000, onProg
 
     while (Date.now() - startTime < timeoutMs) {
         if (isCancelled && isCancelled()) {
-            console.log(`[BURST] Operação cancelada / socket fechado para o nó ${nodePrefixOrName}.`);
+            console.log(`[BURST] Operação cancelada / socket fechado para o nó ${displayName}.`);
             return { joined: false, ready: false, cancelled: true };
         }
 
@@ -128,9 +133,11 @@ async function waitForNodeInCluster(nodePrefixOrName, timeoutMs = 420000, onProg
         if (!sawInTailscale) {
             try {
                 const { stdout: tsOut } = await execAsync('tailscale status');
-                if (tsOut.includes(nodePrefixOrName)) {
+                const tsLower = tsOut.toLowerCase();
+                const matchedTs = targets.find(t => tsLower.includes(t));
+                if (matchedTs) {
                     sawInTailscale = true;
-                    console.log(`[BURST] Nó ${nodePrefixOrName} conectado com sucesso à rede Tailscale!`);
+                    console.log(`[BURST] Nó ${matchedTs} conectado com sucesso à rede Tailscale!`);
                     if (onProgress) onProgress(3, `Nó conectado à VPN Tailscale! Instalando MicroK8s na nuvem e executando join...`);
                 }
             } catch (e) {}
@@ -143,8 +150,8 @@ async function waitForNodeInCluster(nodePrefixOrName, timeoutMs = 420000, onProg
             const nodes = data.items || [];
 
             const foundNode = nodes.find(n => {
-                const name = n.metadata?.name || '';
-                return name.toLowerCase().includes(nodePrefixOrName.toLowerCase());
+                const name = (n.metadata?.name || '').toLowerCase();
+                return targets.some(t => name.includes(t) || t.includes(name));
             });
 
             if (foundNode) {
@@ -183,7 +190,7 @@ async function waitForNodeInCluster(nodePrefixOrName, timeoutMs = 420000, onProg
         await new Promise(r => setTimeout(r, 6000));
     }
 
-    console.warn(`[BURST AVISO] Timeout (${timeoutMs / 1000}s) aguardando nó ${nodePrefixOrName} no cluster.`);
+    console.warn(`[BURST AVISO] Timeout (${timeoutMs / 1000}s) aguardando nó ${displayName} no cluster.`);
     return { joined: false, ready: false };
 }
 
@@ -214,16 +221,21 @@ async function addNode({ provider, credentials, customJoinCommand, onProgress, o
     const joinCommand = customJoinCommand || await generateJoinCommand();
 
     console.log(`[BURST] Adicionando nó na nuvem ${name}...`);
-    const nodeId = await module.addNode(joinCommand, resolvedCredentials, { onProgress, tags, onCreated });
+    const addResult = await module.addNode(joinCommand, resolvedCredentials, { onProgress, tags, onCreated });
+    const nodeId = typeof addResult === 'object' ? addResult.nodeId : addResult;
+    const nodeName = typeof addResult === 'object' ? (addResult.nodeName || addResult.nodeId) : addResult;
+    const expectedNames = typeof addResult === 'object' && Array.isArray(addResult.expectedNames)
+        ? addResult.expectedNames
+        : [nodeId, nodeName].filter(Boolean);
 
     if (isCancelled && isCancelled()) {
         throw new Error(`Operação cancelada antes do monitoramento do nó ${nodeId}.`);
     }
 
-    if (onProgress) onProgress(3, `Instância ${nodeId} criada! Aguardando boot e join no cluster...`);
+    if (onProgress) onProgress(3, `Instância criada! Aguardando boot e join no cluster...`);
 
     // Aguarda ativamente até que o nó apareça no cluster (timeout de 7 minutos)
-    const clusterResult = await waitForNodeInCluster(nodeId, 420000, onProgress, isCancelled);
+    const clusterResult = await waitForNodeInCluster(expectedNames, 420000, onProgress, isCancelled);
     if (clusterResult.cancelled) {
         throw new Error(`Operação cancelada pelo usuário enquanto aguardava o nó ${nodeId}.`);
     }
@@ -233,7 +245,7 @@ async function addNode({ provider, credentials, customJoinCommand, onProgress, o
 
     return {
         nodeId,
-        nodeName: clusterResult.nodeName || nodeId,
+        nodeName: clusterResult.nodeName || nodeName || nodeId,
         provider: name,
         credentials: resolvedCredentials
     };
@@ -246,14 +258,15 @@ async function removeNode({ nodeId, nodeName, provider, credentials, privateDnsO
     const { name, module } = resolveProvider(provider);
     const resolvedCredentials = { ...getEnvCredentials(name), ...(credentials || {}) };
 
-    const hostToRemove = privateDnsOrHost || nodeName || nodeId;
-    if (hostToRemove) {
-        console.log(`[BURST] Ejetando nó (${hostToRemove}) do Kubernetes local...`);
+    const hostnamesToRemove = [privateDnsOrHost, nodeName, nodeId].filter(Boolean);
+    for (const host of hostnamesToRemove) {
         try {
-            await execAsync(`microk8s kubectl delete node ${hostToRemove}`);
-            console.log(`[BURST] Nó ${hostToRemove} excluído com sucesso do MicroK8s.`);
+            console.log(`[BURST] Tentando ejetar nó (${host}) do Kubernetes local...`);
+            await execAsync(`microk8s kubectl delete node ${host}`);
+            console.log(`[BURST] Nó ${host} excluído com sucesso do MicroK8s.`);
+            break;
         } catch (e) {
-            console.warn(`[BURST AVISO] Não foi possível remover nó do Kubernetes: ${e.message}`);
+            // Se o nó não existir com este nome específico, tenta o próximo candidato
         }
     }
 
