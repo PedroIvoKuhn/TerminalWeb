@@ -108,13 +108,21 @@ async function generateJoinCommand() {
 /**
  * Aguarda ativamente até que o nó de burst apareça no MicroK8s
  */
-async function waitForNodeInCluster(nodePrefixOrName, timeoutMs = 240000, onProgress) {
+async function waitForNodeInCluster(nodePrefixOrName, timeoutMs = 420000, onProgress, isCancelled) {
     const startTime = Date.now();
-    console.log(`[BURST] Monitorando cluster: aguardando nó '${nodePrefixOrName}' aparecer no MicroK8s...`);
+    console.log(`[BURST] Monitorando cluster: aguardando nó '${nodePrefixOrName}' aparecer no MicroK8s (timeout: ${timeoutMs / 1000}s)...`);
 
     let sawInTailscale = false;
+    let lastProgressNotice = Date.now();
 
     while (Date.now() - startTime < timeoutMs) {
+        if (isCancelled && isCancelled()) {
+            console.log(`[BURST] Operação cancelada / socket fechado para o nó ${nodePrefixOrName}.`);
+            return { joined: false, ready: false, cancelled: true };
+        }
+
+        const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+
         // 1. Verifica se o nó já apareceu no Tailscale para dar feedback ao usuário
         if (!sawInTailscale) {
             try {
@@ -150,11 +158,19 @@ async function waitForNodeInCluster(nodePrefixOrName, timeoutMs = 240000, onProg
                 } else {
                     console.log(`[BURST] Nó ${name} detectado no cluster! Aguardando kubelet ficar Ready...`);
                     if (onProgress) onProgress(4, `Nó ${name} detectado no cluster! Aguardando inicialização completa...`);
-                    // Se já detectou o nó no cluster, mesmo que NotReady por enquanto, aguarda até 30s adicionais ou retorna sucesso
                     return { joined: true, ready: false, nodeName: name };
                 }
             }
         } catch (e) {}
+
+        // Notifica progresso periódico a cada ~25 segundos
+        if (Date.now() - lastProgressNotice > 25000 && onProgress) {
+            lastProgressNotice = Date.now();
+            const msg = sawInTailscale
+                ? `Nó conectado na VPN. Instalando pacotes e realizando join (${elapsedSec}s decorridos)...`
+                : `Aguardando boot da máquina e conexão à VPN (${elapsedSec}s decorridos)...`;
+            onProgress(3, msg);
+        }
 
         await new Promise(r => setTimeout(r, 6000));
     }
@@ -170,9 +186,11 @@ async function waitForNodeInCluster(nodePrefixOrName, timeoutMs = 240000, onProg
  * @param {Object} [options.credentials] - Credenciais da nuvem (se omitido, usa .env)
  * @param {string} [options.customJoinCommand] - Comando de join pré-gerado (opcional)
  * @param {Function} [options.onProgress] - Callback para notificar progresso (step, message)
+ * @param {Function} [options.onCreated] - Callback chamado assim que o nó é instanciado na nuvem
+ * @param {Function} [options.isCancelled] - Função que verifica se a operação foi cancelada
  * @param {Object} [options.tags] - Metadados de tags (jobId, socketId, etc.)
  */
-async function addNode({ provider, credentials, customJoinCommand, onProgress, tags = {} } = {}) {
+async function addNode({ provider, credentials, customJoinCommand, onProgress, onCreated, isCancelled, tags = {} } = {}) {
     const { name, module } = resolveProvider(provider);
     const resolvedCredentials = { ...getEnvCredentials(name), ...(credentials || {}) };
 
@@ -188,12 +206,19 @@ async function addNode({ provider, credentials, customJoinCommand, onProgress, t
     const joinCommand = customJoinCommand || await generateJoinCommand();
 
     console.log(`[BURST] Adicionando nó na nuvem ${name}...`);
-    const nodeId = await module.addNode(joinCommand, resolvedCredentials, { onProgress, tags });
+    const nodeId = await module.addNode(joinCommand, resolvedCredentials, { onProgress, tags, onCreated });
 
-    if (onProgress) onProgress(3, `Instância ${nodeId} criada! Aguardando boot e join no cluster (pode levar 2 a 3 min)...`);
+    if (isCancelled && isCancelled()) {
+        throw new Error(`Operação cancelada antes do monitoramento do nó ${nodeId}.`);
+    }
 
-    // Aguarda ativamente até que o nó apareça no cluster
-    const clusterResult = await waitForNodeInCluster(nodeId, 240000, onProgress);
+    if (onProgress) onProgress(3, `Instância ${nodeId} criada! Aguardando boot e join no cluster...`);
+
+    // Aguarda ativamente até que o nó apareça no cluster (timeout de 7 minutos)
+    const clusterResult = await waitForNodeInCluster(nodeId, 420000, onProgress, isCancelled);
+    if (clusterResult.cancelled) {
+        throw new Error(`Operação cancelada pelo usuário enquanto aguardava o nó ${nodeId}.`);
+    }
     if (!clusterResult.joined) {
         throw new Error(`A máquina virtual ${nodeId} foi criada na ${name}, mas o MicroK8s não concluiu o join dentro do tempo limite. Verifique os logs em /var/log/burst-init.log na instância.`);
     }
@@ -209,22 +234,25 @@ async function addNode({ provider, credentials, customJoinCommand, onProgress, t
 /**
  * Remove o nó do Kubernetes e destrói o recurso na nuvem de forma assíncrona
  */
-async function removeNode({ nodeId, provider, credentials, privateDnsOrHost } = {}) {
+async function removeNode({ nodeId, nodeName, provider, credentials, privateDnsOrHost } = {}) {
     const { name, module } = resolveProvider(provider);
     const resolvedCredentials = { ...getEnvCredentials(name), ...(credentials || {}) };
 
-    if (privateDnsOrHost) {
-        console.log(`[BURST] Ejetando nó (${privateDnsOrHost}) do Kubernetes local...`);
+    const hostToRemove = privateDnsOrHost || nodeName || nodeId;
+    if (hostToRemove) {
+        console.log(`[BURST] Ejetando nó (${hostToRemove}) do Kubernetes local...`);
         try {
-            await execAsync(`microk8s kubectl delete node ${privateDnsOrHost}`);
-            console.log("[BURST] Nó excluído com sucesso do MicroK8s.");
+            await execAsync(`microk8s kubectl delete node ${hostToRemove}`);
+            console.log(`[BURST] Nó ${hostToRemove} excluído com sucesso do MicroK8s.`);
         } catch (e) {
             console.warn(`[BURST AVISO] Não foi possível remover nó do Kubernetes: ${e.message}`);
         }
     }
 
-    console.log(`[BURST] Destruindo instância ${nodeId} na ${name}...`);
-    return await module.removeNode(nodeId, resolvedCredentials);
+    if (nodeId) {
+        console.log(`[BURST] Destruindo instância ${nodeId} na ${name}...`);
+        return await module.removeNode(nodeId, resolvedCredentials);
+    }
 }
 
 /**

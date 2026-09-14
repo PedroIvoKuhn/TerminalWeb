@@ -153,6 +153,8 @@ module.exports = (io) => {
         });
 
         socket.on("disconnect", async () => {
+            socket.data.isDisconnected = true;
+            socket.data.burstCancelled = true;
             const { jobId, execWs } = socket.data;
 
             if (execWs) {
@@ -241,6 +243,9 @@ async function handleSessionBurst(socket) {
 
     const provider = (process.env.CLOUD_PROVIDER || 'AWS').toUpperCase();
     socket.data.isBursting = true;
+    socket.data.burstCancelled = false;
+
+    let pendingBurstInfo = null;
 
     try {
         console.log(`[Socket ${socket.id}] Iniciando solicitação de Cloud Bursting para ${provider}...`);
@@ -252,16 +257,43 @@ async function handleSessionBurst(socket) {
                 socketId: socket.id,
                 jobId: socket.data.jobId || `pending-${socket.id}`
             },
+            onCreated: (createdNodeId) => {
+                pendingBurstInfo = {
+                    nodeId: createdNodeId,
+                    nodeName: createdNodeId,
+                    provider
+                };
+                sessionService.registerPendingBurst(socket.id, pendingBurstInfo);
+                console.log(`[BURST] Nó ${createdNodeId} criado e registrado como pendente para o socket ${socket.id}.`);
+
+                // Se o socket desconectou enquanto a VM era provisionada, destrói imediatamente!
+                if (socket.disconnected || socket.data.isDisconnected) {
+                    console.warn(`[BURST] Socket ${socket.id} já desconectou! Limpando nó ${createdNodeId} imediatamente...`);
+                    sessionService.cleanupPendingBurst(socket.id);
+                }
+            },
+            isCancelled: () => {
+                return socket.disconnected || socket.data.isDisconnected || socket.data.burstCancelled;
+            },
             onProgress: (step, message) => {
-                socket.emit('burst:step', { step, message });
+                if (!socket.disconnected) {
+                    socket.emit('burst:step', { step, message });
+                }
             }
         });
+
+        // Se o socket desconectou durante a espera do join
+        if (socket.disconnected || socket.data.isDisconnected) {
+            console.warn(`[BURST] Socket ${socket.id} desconectou antes da conclusão! Limpando nó pendente...`);
+            await sessionService.cleanupPendingBurst(socket.id);
+            return;
+        }
 
         // Se o usuário já tiver uma sessão ativa vincula ao JobId
         if (socket.data.jobId) {
             sessionService.registerBurstNode(socket.data.jobId, result);
         } else {
-            // Caso contrário, registra como pendente no socket.id
+            // Caso contrário, atualiza como pendente com nodeName oficial
             sessionService.registerPendingBurst(socket.id, result);
         }
 
@@ -273,9 +305,18 @@ async function handleSessionBurst(socket) {
         console.log(`[Socket ${socket.id}] Cloud Bursting concluído com sucesso. NodeId: ${result.nodeId}`);
     } catch (err) {
         console.error(`[Socket ${socket.id}] Erro no Cloud Bursting:`, err.message);
-        socket.emit('burst:error', {
-            message: err.message || 'Erro desconhecido ao provisionar nó na nuvem.'
-        });
+
+        // Se a máquina chegou a ser criada na nuvem mas a operação falhou depois (ou socket fechou), limpa imediatamente!
+        if (pendingBurstInfo && pendingBurstInfo.nodeId) {
+            console.log(`[BURST] Destruindo máquina ${pendingBurstInfo.nodeId} devido a erro/cancelamento no socket ${socket.id}...`);
+            await sessionService.cleanupPendingBurst(socket.id);
+        }
+
+        if (!socket.disconnected) {
+            socket.emit('burst:error', {
+                message: err.message || 'Erro desconhecido ao provisionar nó na nuvem.'
+            });
+        }
     } finally {
         socket.data.isBursting = false;
     }

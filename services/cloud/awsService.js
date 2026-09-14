@@ -78,6 +78,8 @@ async function getLatestUbuntuAmi(client) {
 }
 
 function buildUserDataScript(joinCommand = '', tailscaleKey = process.env.TAILSCALE_AUTH_KEY) {
+    const masterHost = (joinCommand.match(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/) || [])[0] || '100.90.80.70';
+
     let script = `#!/bin/bash
 exec > /var/log/burst-init.log 2>&1
 set -x
@@ -85,14 +87,14 @@ set -x
 echo "=== INICIANDO CONFIGURACAO DO BURST NODE AWS ==="
 date
 
-# Aguarda eventuais locks do apt da inicialização do Ubuntu
-while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
-    echo "Aguardando lock do apt ser liberado..."
-    sleep 3
-done
-
-apt-get update -y
-apt-get install -y curl
+# Garante curl instalado rapidamente sem update desnecessário se já existir
+if ! command -v curl >/dev/null 2>&1; then
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
+        echo "Aguardando lock do apt ser liberado..."
+        sleep 2
+    done
+    apt-get update -y && apt-get install -y curl
+fi
 
 # --- Instalando e Configurando o Tailscale ---
 echo "--- Instalando Tailscale ---"
@@ -112,6 +114,14 @@ for i in {1..30}; do
     fi
     sleep 2
 done
+
+# Redireciona chamadas ao Kubernetes ClusterIP e LAN privada para o IP do Master via Tailscale
+echo "--- Configurando iptables DNAT para Kubernetes Service ---"
+iptables -t nat -I OUTPUT 1 -d 10.152.183.1 -p tcp --dport 443 -j DNAT --to-destination ${masterHost}:16443
+iptables -t nat -I PREROUTING 1 -d 10.152.183.1 -p tcp --dport 443 -j DNAT --to-destination ${masterHost}:16443
+iptables -t nat -I OUTPUT 1 -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination ${masterHost}:16443
+iptables -t nat -I PREROUTING 1 -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination ${masterHost}:16443
+iptables -t nat -A POSTROUTING -o tailscale0 -j MASQUERADE
 `;
     } else {
         console.warn("AVISO: TAILSCALE_AUTH_KEY não definido. Instância subirá sem VPN.");
@@ -127,23 +137,21 @@ for i in {1..5}; do
 done
 
 usermod -aG microk8s ubuntu
-microk8s status --wait-ready
 
-# Configura o kubelet para anunciar explicitamente o IP do Tailscale ao cluster
+# Configura o kubelet para anunciar o IP do Tailscale ao cluster
 if [ -n "$TS_IP" ]; then
     echo "Configurando --node-ip=$TS_IP no kubelet..."
+    mkdir -p /var/snap/microk8s/current/args
     echo "--node-ip=$TS_IP" >> /var/snap/microk8s/current/args/kubelet
-    systemctl restart snap.microk8s.daemon-kubelet || true
-    sleep 5
 fi
 
 mkdir -p /home/ubuntu/.kube
 chown -f -R ubuntu:ubuntu /home/ubuntu/.kube || true
 
-# --- Injetando Comando do Cluster Local ---
+# --- Executando Join com MicroK8s Master ---
 echo "--- INICIANDO JOIN COM MICROK8S ---"
 date
-for i in {1..5}; do
+for i in {1..10}; do
     echo "Tentativa $i de join..."
     ${finalJoin} && break || sleep 5
 done
@@ -157,7 +165,7 @@ date
 }
 
 async function addNode(joinCommand = '', credentials = {}, options = {}) {
-    const { onProgress, tags = {} } = options;
+    const { onProgress, tags = {}, onCreated } = options;
     const client = createEc2Client(credentials);
     const instanceType = credentials.instanceType || process.env.INSTANCE_TYPE || 't2.micro';
     const keyPairName = credentials.keyPairName || process.env.AWS_KEY_PAIR_NAME;
@@ -166,26 +174,27 @@ async function addNode(joinCommand = '', credentials = {}, options = {}) {
     const amiId = await getLatestUbuntuAmi(client);
     console.log(`-> AMI encontrada: ${amiId}`);
 
-    const encodedUserData = buildUserDataScript(joinCommand, credentials.tailscaleAuthKey);
+    const userData = buildUserDataScript(joinCommand, credentials.tailscaleAuthKey);
 
-    const tagList = [
-        { Key: "Name", Value: "BurstNode" },
-        { Key: "Role", Value: "CloudBurstingWorker" },
-        { Key: "ManagedBy", Value: "TerminalWeb" }
+    const instanceTags = [
+        { Key: 'Name', Value: `burst-node-${Date.now()}` },
+        { Key: 'Role', Value: 'CloudBurstingWorker' },
+        { Key: 'ManagedBy', Value: 'TerminalWeb' }
     ];
-    if (tags.jobId) tagList.push({ Key: "JobId", Value: String(tags.jobId) });
-    if (tags.socketId) tagList.push({ Key: "SocketId", Value: String(tags.socketId) });
+
+    if (tags.jobId) instanceTags.push({ Key: 'JobId', Value: String(tags.jobId) });
+    if (tags.socketId) instanceTags.push({ Key: 'SocketId', Value: String(tags.socketId) });
 
     const params = {
         ImageId: amiId,
         InstanceType: instanceType,
         MinCount: 1,
         MaxCount: 1,
-        UserData: encodedUserData,
+        UserData: userData,
         TagSpecifications: [
             {
-                ResourceType: "instance",
-                Tags: tagList
+                ResourceType: 'instance',
+                Tags: instanceTags
             }
         ]
     };
@@ -199,6 +208,9 @@ async function addNode(joinCommand = '', credentials = {}, options = {}) {
         const response = await client.send(command);
         const instanceId = response.Instances[0].InstanceId;
         console.log(`[SUCESSO] Instância criada! ID: ${instanceId}`);
+        if (onCreated) {
+            onCreated(instanceId);
+        }
         if (onProgress) onProgress(3, `Instância criada (${instanceId}). Conectando via Tailscale e iniciando MicroK8s...`);
         return instanceId;
     } catch (error) {

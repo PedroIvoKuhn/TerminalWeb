@@ -21,7 +21,12 @@ function registerPendingBurst(socketId, burstInfo) {
     if (!pendingBursts[socketId]) {
         pendingBursts[socketId] = [];
     }
-    pendingBursts[socketId].push(burstInfo);
+    const idx = pendingBursts[socketId].findIndex(b => b.nodeId === burstInfo.nodeId);
+    if (idx >= 0) {
+        pendingBursts[socketId][idx] = { ...pendingBursts[socketId][idx], ...burstInfo };
+    } else {
+        pendingBursts[socketId].push(burstInfo);
+    }
 }
 
 function getPendingBursts(socketId) {
@@ -31,15 +36,15 @@ function getPendingBursts(socketId) {
 async function cleanupPendingBurst(socketId) {
     const bursts = pendingBursts[socketId];
     if (bursts && bursts.length > 0) {
-        console.log(`[BURST] Limpando nó(s) de burst pendente(s) para socket ${socketId}...`);
+        console.log(`[BURST] Limpando ${bursts.length} nó(s) de burst pendente(s) para socket ${socketId}...`);
+        delete pendingBursts[socketId];
         for (const burst of bursts) {
             try {
                 await cloudBurstingService.removeNode(burst);
             } catch (err) {
-                console.error(`[BURST] Erro ao limpar nó pendente:`, err.message);
+                console.error(`[BURST] Erro ao limpar nó pendente ${burst.nodeId}:`, err.message);
             }
         }
-        delete pendingBursts[socketId];
     }
 }
 
@@ -227,6 +232,38 @@ async function syncSessionsK8s() {
             }, null)
       };
     }
+  }
+
+  // Limpa quaisquer nós de burst órfãos deixados na nuvem em reinicializações anteriores
+  await cleanupOrphanBurstNodes();
+}
+
+async function cleanupOrphanBurstNodes() {
+  try {
+    const provider = (process.env.CLOUD_PROVIDER || 'AWS').toUpperCase();
+    console.log(`[SYNC] Verificando nós de burst órfãos na nuvem ${provider}...`);
+    const burstNodes = await cloudBurstingService.listBurstNodes({ provider });
+    
+    const activeJobIds = new Set(Object.keys(activeSessions));
+
+    for (const node of burstNodes) {
+      const nodeJobId = node.jobId || node.tags?.JobId;
+      if (!nodeJobId || String(nodeJobId).startsWith('pending-') || !activeJobIds.has(nodeJobId)) {
+        const targetId = node.id || node.name;
+        console.log(`[SYNC] Encontrado nó órfão ${targetId} (${nodeJobId}). Removendo...`);
+        try {
+          await cloudBurstingService.removeNode({
+            nodeId: targetId,
+            nodeName: targetId,
+            provider
+          });
+        } catch (err) {
+          console.warn(`[SYNC AVISO] Erro ao remover nó órfão ${targetId}:`, err.message);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`[SYNC AVISO] Falha ao verificar nós órfãos na inicialização:`, err.message);
   }
 }
 
