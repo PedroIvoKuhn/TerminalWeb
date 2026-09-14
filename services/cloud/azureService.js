@@ -112,13 +112,10 @@ for i in {1..30}; do
     sleep 2
 done
 
-# Redireciona chamadas ao Kubernetes ClusterIP e LAN privada para o IP do Master via Tailscale
-echo "--- Configurando iptables DNAT para Kubernetes Service ---"
-iptables -t nat -I OUTPUT 1 -d 10.152.183.1 -p tcp --dport 443 -j DNAT --to-destination ${masterHost}:16443
-iptables -t nat -I PREROUTING 1 -d 10.152.183.1 -p tcp --dport 443 -j DNAT --to-destination ${masterHost}:16443
-iptables -t nat -I OUTPUT 1 -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination ${masterHost}:16443
-iptables -t nat -I PREROUTING 1 -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination ${masterHost}:16443
-iptables -t nat -A POSTROUTING -o tailscale0 -j MASQUERADE
+# Garante iptables-legacy ativo para compatibilidade com MicroK8s/Calico
+echo "--- Configurando iptables-legacy ---"
+update-alternatives --set iptables /usr/sbin/iptables-legacy || true
+update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy || true
 `;
     }
 
@@ -152,6 +149,61 @@ for i in {1..10}; do
 done
 
 echo "--- JOIN FINALIZADO ---"
+date
+
+# --- Configuracao de DNAT e Watchdog para Kubernetes Service (${masterHost}) ---
+echo "--- Configurando regras de DNAT e Watchdog pos-join ---"
+cat << 'WATCHDOG_EOF' > /usr/local/bin/burst-dnat-watchdog.sh
+#!/bin/bash
+MASTER_HOST="${masterHost}"
+
+apply_rules() {
+    for ipt in iptables-legacy iptables; do
+        # 1. Garante que a regra de DNAT para o Service ClusterIP esteja sempre na posicao 1 do OUTPUT
+        first_out=$($ipt -t nat -S OUTPUT 2>/dev/null | sed -n '2p')
+        if ! echo "$first_out" | grep -q "10.152.183.1"; then
+            $ipt -t nat -I OUTPUT 1 -d 10.152.183.1 -p tcp --dport 443 -j DNAT --to-destination $MASTER_HOST:16443 2>/dev/null || true
+        fi
+
+        # 2. Garante que a regra de DNAT para o Service ClusterIP esteja sempre na posicao 1 do PREROUTING
+        first_pre=$($ipt -t nat -S PREROUTING 2>/dev/null | sed -n '2p')
+        if ! echo "$first_pre" | grep -q "10.152.183.1"; then
+            $ipt -t nat -I PREROUTING 1 -d 10.152.183.1 -p tcp --dport 443 -j DNAT --to-destination $MASTER_HOST:16443 2>/dev/null || true
+        fi
+
+        # 3. Garante DNAT da faixa privada para evitar timeout caso kube-proxy direcione para outros masters
+        if ! $ipt -t nat -C OUTPUT -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination $MASTER_HOST:16443 2>/dev/null; then
+            $ipt -t nat -A OUTPUT -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination $MASTER_HOST:16443 2>/dev/null || true
+        fi
+        if ! $ipt -t nat -C PREROUTING -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination $MASTER_HOST:16443 2>/dev/null; then
+            $ipt -t nat -A PREROUTING -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination $MASTER_HOST:16443 2>/dev/null || true
+        fi
+
+        # 4. Masquerade na interface tailscale0
+        if ! $ipt -t nat -C POSTROUTING -o tailscale0 -j MASQUERADE 2>/dev/null; then
+            $ipt -t nat -A POSTROUTING -o tailscale0 -j MASQUERADE 2>/dev/null || true
+        fi
+    done
+}
+
+while true; do
+    apply_rules
+    sleep 3
+done
+WATCHDOG_EOF
+
+chmod +x /usr/local/bin/burst-dnat-watchdog.sh
+nohup /usr/local/bin/burst-dnat-watchdog.sh >/var/log/burst-watchdog.log 2>&1 &
+
+# Executa imediatamente a primeira aplicacao das regras
+for ipt in iptables-legacy iptables; do
+    $ipt -t nat -I OUTPUT 1 -d 10.152.183.1 -p tcp --dport 443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
+    $ipt -t nat -I PREROUTING 1 -d 10.152.183.1 -p tcp --dport 443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
+    $ipt -t nat -A OUTPUT -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
+    $ipt -t nat -A PREROUTING -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
+    $ipt -t nat -A POSTROUTING -o tailscale0 -j MASQUERADE 2>/dev/null || true
+done
+echo "=== CONFIGURACAO CONCLUIDA COM SUCESSO ==="
 date
 `;
     }

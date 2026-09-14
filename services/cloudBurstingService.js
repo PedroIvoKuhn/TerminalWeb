@@ -113,6 +113,7 @@ async function waitForNodeInCluster(nodePrefixOrName, timeoutMs = 420000, onProg
     console.log(`[BURST] Monitorando cluster: aguardando nó '${nodePrefixOrName}' aparecer no MicroK8s (timeout: ${timeoutMs / 1000}s)...`);
 
     let sawInTailscale = false;
+    let calicoRestartTriggered = false;
     let lastProgressNotice = Date.now();
 
     while (Date.now() - startTime < timeoutMs) {
@@ -157,8 +158,15 @@ async function waitForNodeInCluster(nodePrefixOrName, timeoutMs = 420000, onProg
                     return { joined: true, ready: true, nodeName: name };
                 } else {
                     console.log(`[BURST] Nó ${name} detectado no cluster! Aguardando kubelet ficar Ready...`);
-                    if (onProgress) onProgress(4, `Nó ${name} detectado no cluster! Aguardando inicialização completa...`);
-                    return { joined: true, ready: false, nodeName: name };
+                    if (onProgress) onProgress(4, `Nó ${name} detectado no cluster! Aguardando inicialização da rede/CNI...`);
+
+                    // Se o calico-node falhou nos primeiros segundos por causa de inicialização assíncrona,
+                    // reinicia o pod calico-node deste nó para que ele não fique esperando o tempo de backoff
+                    if (!calicoRestartTriggered && elapsedSec >= 20) {
+                        calicoRestartTriggered = true;
+                        console.log(`[BURST] Nó ${name} aguardando rede. Reiniciando pod calico-node para inicialização imediata...`);
+                        execAsync(`microk8s kubectl delete pod -n kube-system -l k8s-app=calico-node --field-selector spec.nodeName=${name}`).catch(() => {});
+                    }
                 }
             }
         } catch (e) {}
