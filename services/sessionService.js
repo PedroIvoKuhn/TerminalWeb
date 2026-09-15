@@ -1,3 +1,6 @@
+const { exec } = require('child_process');
+const util = require('util');
+const execAsync = util.promisify(exec);
 const k8sService = require('./k8sService');
 const minioService = require('./minioService');
 const cloudBurstingService = require('./cloudBurstingService');
@@ -238,34 +241,94 @@ async function syncSessionsK8s() {
   await cleanupOrphanBurstNodes();
 }
 
-async function cleanupOrphanBurstNodes() {
-  try {
-    const provider = (process.env.CLOUD_PROVIDER || 'AWS').toUpperCase();
-    console.log(`[SYNC] Verificando nós de burst órfãos na nuvem ${provider}...`);
-    const burstNodes = await cloudBurstingService.listBurstNodes({ provider });
-    
-    const activeJobIds = new Set(Object.keys(activeSessions));
+let isCleaningUpOrphans = false;
 
-    for (const node of burstNodes) {
-      const nodeJobId = node.jobId || node.tags?.JobId;
-      if (!nodeJobId || String(nodeJobId).startsWith('pending-') || !activeJobIds.has(nodeJobId)) {
-        const targetId = node.id || node.name;
-        console.log(`[SYNC] Encontrado nó órfão ${targetId} (${nodeJobId}). Removendo...`);
-        try {
-          await cloudBurstingService.removeNode({
-            nodeId: targetId,
-            nodeName: targetId,
-            provider
-          });
-        } catch (err) {
-          console.warn(`[SYNC AVISO] Erro ao remover nó órfão ${targetId}:`, err.message);
+async function cleanupOrphanBurstNodes() {
+  if (isCleaningUpOrphans) return;
+  isCleaningUpOrphans = true;
+
+  try {
+    const activeJobIds = new Set(Object.keys(activeSessions));
+    const activeNodeNames = new Set();
+
+    // 1. Mapeia nós de sessões ativas
+    for (const session of Object.values(activeSessions)) {
+      if (session.burstNodes) {
+        for (const bn of session.burstNodes) {
+          if (bn.nodeName) activeNodeNames.add(String(bn.nodeName).toLowerCase());
+          if (bn.nodeId) activeNodeNames.add(String(bn.nodeId).toLowerCase());
         }
       }
     }
-  } catch (err) {
-    console.warn(`[SYNC AVISO] Falha ao verificar nós órfãos na inicialização:`, err.message);
+
+    // 2. Mapeia nós pendentes (criados antes da sessão iniciar no socket)
+    for (const bursts of Object.values(pendingBursts)) {
+      for (const bn of bursts) {
+        if (bn.nodeName) activeNodeNames.add(String(bn.nodeName).toLowerCase());
+        if (bn.nodeId) activeNodeNames.add(String(bn.nodeId).toLowerCase());
+      }
+    }
+
+    // 3. Limpeza de nós órfãos diretamente no Kubernetes
+    try {
+      const { stdout } = await execAsync('microk8s kubectl get nodes -o json');
+      const data = JSON.parse(stdout);
+      const k8sNodes = data.items || [];
+
+      for (const n of k8sNodes) {
+        const nodeName = n.metadata?.name || '';
+        const lowerName = nodeName.toLowerCase();
+        const isBurstNode = lowerName.startsWith('burst-node-') || 
+                            n.metadata?.labels?.['Role'] === 'CloudBurstingWorker' ||
+                            Boolean(n.metadata?.labels?.['tenant']);
+
+        if (isBurstNode && !activeNodeNames.has(lowerName)) {
+          console.log(`[SYNC] Encontrado nó órfão no Kubernetes: ${nodeName}. Ejetando do cluster...`);
+          try {
+            await execAsync(`microk8s kubectl delete node ${nodeName}`);
+            console.log(`[SYNC] Nó órfão ${nodeName} excluído com sucesso do Kubernetes.`);
+          } catch (delErr) {
+            console.warn(`[SYNC AVISO] Falha ao excluir nó órfão ${nodeName} do K8s:`, delErr.message);
+          }
+        }
+      }
+    } catch (k8sErr) {
+      console.warn(`[SYNC AVISO] Falha ao consultar nós do Kubernetes:`, k8sErr.message);
+    }
+
+    // 4. Limpeza de instâncias órfãs remanescentes na Nuvem (AWS / Azure)
+    try {
+      const provider = (process.env.CLOUD_PROVIDER || 'AWS').toUpperCase();
+      const burstNodes = await cloudBurstingService.listBurstNodes({ provider });
+
+      for (const node of burstNodes) {
+        const nodeJobId = node.jobId || node.tags?.JobId;
+        if (!nodeJobId || String(nodeJobId).startsWith('pending-') || !activeJobIds.has(nodeJobId)) {
+          const targetId = node.id || node.name;
+          console.log(`[SYNC] Encontrado nó órfão ${targetId} (${nodeJobId}) na nuvem. Removendo...`);
+          try {
+            await cloudBurstingService.removeNode({
+              nodeId: targetId,
+              nodeName: targetId,
+              provider
+            });
+          } catch (err) {
+            console.warn(`[SYNC AVISO] Erro ao remover nó órfão ${targetId} da nuvem:`, err.message);
+          }
+        }
+      }
+    } catch (cloudErr) {
+      console.warn(`[SYNC AVISO] Falha ao verificar nós órfãos na nuvem:`, cloudErr.message);
+    }
+  } finally {
+    isCleaningUpOrphans = false;
   }
 }
+
+// Reconciliação periódica em background a cada 10 minutos
+setInterval(() => {
+  cleanupOrphanBurstNodes().catch(() => {});
+}, 10 * 60 * 1000);
 
 function removeSocket(jobId, socketToRemove) {
   const session = activeSessions[jobId];

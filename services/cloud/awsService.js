@@ -230,6 +230,42 @@ WATCHDOG_EOF
 chmod +x /usr/local/bin/burst-dnat-watchdog.sh
 nohup /usr/local/bin/burst-dnat-watchdog.sh >/var/log/burst-watchdog.log 2>&1 &
 
+# --- Configuracao do Heartbeat Watchdog (${masterHost}) ---
+echo "--- Configurando Heartbeat Watchdog ---"
+cat << 'HEARTBEAT_EOF' > /usr/local/bin/burst-heartbeat-watchdog.sh
+#!/bin/bash
+MASTER_HOST="${masterHost}"
+MAX_FAILURES=5
+FAIL_COUNT=0
+
+# Carencia inicial de 3 minutos para estabilizacao de rede e pods pos-join
+sleep 180
+
+echo "[HEARTBEAT] Iniciando monitoramento de conectividade com o master em $MASTER_HOST..."
+
+while true; do
+    # Testa se a API do MicroK8s no Master responde via Tailscale VPN
+    if curl -k -f -s --connect-timeout 5 --max-time 10 "https://\${MASTER_HOST}:16443/healthz" >/dev/null 2>&1; then
+        FAIL_COUNT=0
+    else
+        FAIL_COUNT=\$((FAIL_COUNT + 1))
+        echo "[HEARTBEAT] Falha de conexao com o backend (\$FAIL_COUNT/\$MAX_FAILURES) em \$(date)"
+        
+        if [ "\$FAIL_COUNT" -ge "\$MAX_FAILURES" ]; then
+            echo "[HEARTBEAT CRITICO] Master inacessivel por \$MAX_FAILURES minutos consecutivos. Iniciando auto-terminacao..."
+            sync
+            poweroff
+            exit 0
+        fi
+    fi
+
+    sleep 60
+done
+HEARTBEAT_EOF
+
+chmod +x /usr/local/bin/burst-heartbeat-watchdog.sh
+nohup /usr/local/bin/burst-heartbeat-watchdog.sh >/var/log/burst-heartbeat.log 2>&1 &
+
 # Executa imediatamente a primeira aplicacao das regras
 for ipt in iptables-legacy iptables; do
     $ipt -t nat -I OUTPUT 1 -d 10.152.183.1 -p tcp --dport 443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
@@ -274,6 +310,7 @@ async function addNode(joinCommand = '', credentials = {}, options = {}) {
         MinCount: 1,
         MaxCount: 1,
         UserData: userData,
+        InstanceInitiatedShutdownBehavior: 'terminate',
         TagSpecifications: [
             {
                 ResourceType: 'instance',
