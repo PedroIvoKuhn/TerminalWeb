@@ -594,6 +594,12 @@ document.getElementById('btn-kill-session').addEventListener('click', () => {
     socket.emit("kill-session");
 });
 
+window.addEventListener('beforeunload', () => {
+    if (burstChkRemember && !burstChkRemember.checked) {
+        clearCloudSessionCredentials();
+    }
+});
+
 document.getElementById('btn-extend-24h').addEventListener('click', (e) => {
     e.target.disabled = true;
     e.target.textContent = "Processando...";
@@ -663,22 +669,288 @@ const AppModal = {
 
 // --- CLOUD BURSTING ---
 const btnBursting = document.getElementById('bursting');
+const btnSetupBurst = document.getElementById('btn-setup-burst');
 const burstModal = document.getElementById('burst-modal');
+
+// Views do Modal de Bursting
+const burstViewSelection = document.getElementById('burst-view-selection');
+const burstViewForm = document.getElementById('burst-view-form');
+const burstViewProgress = document.getElementById('burst-view-progress');
+
+// Seleção de Provedor
+const cardSelectAws = document.getElementById('card-select-aws');
+const cardSelectAzure = document.getElementById('card-select-azure');
+const btnBurstCloseSelection = document.getElementById('btn-burst-close-selection');
+const btnBurstCancelSelection = document.getElementById('btn-burst-cancel-selection');
+
+// Formulário de Credenciais
+const btnBurstFormBack = document.getElementById('btn-burst-form-back');
+const burstFormProviderBadge = document.getElementById('burst-form-provider-badge');
+const btnOpenCloudTutorial = document.getElementById('btn-open-cloud-tutorial');
+const burstCredentialsForm = document.getElementById('burst-credentials-form');
+const burstFieldsAws = document.getElementById('burst-fields-aws');
+const burstFieldsAzure = document.getElementById('burst-fields-azure');
+const burstFormFeedback = document.getElementById('burst-form-feedback');
+const burstChkRemember = document.getElementById('burst-chk-remember');
+const btnBurstFormCancel = document.getElementById('btn-burst-form-cancel');
+
+// Progresso e Console
 const burstProviderBadge = document.getElementById('burst-provider-badge');
+const burstProgressSubtitle = document.getElementById('burst-progress-subtitle');
 const burstConsoleOutput = document.getElementById('burst-console-output');
 const btnBurstFinish = document.getElementById('btn-burst-finish');
 const btnBurstCancel = document.getElementById('btn-burst-cancel');
+const btnBurstRetry = document.getElementById('btn-burst-retry');
+const burstStatusBadge = document.getElementById('burst-status-badge');
 
+let selectedCloudProvider = 'AWS';
 let currentBurstStep = 1;
 let isBurstConnected = false;
+let connectedCloudProvider = null;
 
-// Solicita informações do provedor ativo para atualizar a badge
-socket.emit('burst:get-info');
-socket.on('burst:info', ({ provider }) => {
-    if (burstProviderBadge) {
-        burstProviderBadge.textContent = provider || 'NUVEM';
+// Helpers de Visualização
+function showBurstView(viewName) {
+    if (burstViewSelection) burstViewSelection.style.display = viewName === 'selection' ? 'block' : 'none';
+    if (burstViewForm) burstViewForm.style.display = viewName === 'form' ? 'block' : 'none';
+    if (burstViewProgress) burstViewProgress.style.display = viewName === 'progress' ? 'block' : 'none';
+}
+
+function openBurstModal() {
+    if (isBurstConnected) {
+        AppModal.alert('Nuvem Conectada', `A máquina na nuvem (${connectedCloudProvider || 'Nuvem'}) já está conectada e operando no seu cluster!`);
+        return;
     }
+    showBurstView('selection');
+    if (burstModal) burstModal.style.display = 'flex';
+}
+
+function closeBurstModal() {
+    if (burstModal) burstModal.style.display = 'none';
+}
+
+// Limpa todas as credenciais temporárias do sessionStorage
+function clearCloudSessionCredentials() {
+    try {
+        const keysToRemove = [
+            'tw_aws_region', 'tw_aws_access_key', 'tw_aws_secret_key', 'tw_aws_session_token', 'tw_aws_instance_type',
+            'tw_azure_subscription_id', 'tw_azure_tenant_id', 'tw_azure_client_id', 'tw_azure_client_secret',
+            'tw_azure_location', 'tw_azure_vm_size', 'tw_azure_rg'
+        ];
+        keysToRemove.forEach(k => sessionStorage.removeItem(k));
+    } catch (e) {}
+}
+
+if (burstChkRemember) {
+    burstChkRemember.addEventListener('change', () => {
+        if (!burstChkRemember.checked) {
+            clearCloudSessionCredentials();
+        }
+    });
+}
+
+// Salva e restaura dados em sessionStorage para conveniência do usuário (limpo ao desconectar)
+function loadSavedCredentials(provider) {
+    try {
+        if (provider === 'AWS') {
+            const savedRegion = sessionStorage.getItem('tw_aws_region');
+            const savedAccessKey = sessionStorage.getItem('tw_aws_access_key');
+            const savedSecretKey = sessionStorage.getItem('tw_aws_secret_key');
+            const savedToken = sessionStorage.getItem('tw_aws_session_token');
+            const savedInstance = sessionStorage.getItem('tw_aws_instance_type');
+
+            if (savedRegion) document.getElementById('aws-input-region').value = savedRegion;
+            if (savedAccessKey) document.getElementById('aws-input-access-key').value = savedAccessKey;
+            if (savedSecretKey) document.getElementById('aws-input-secret-key').value = savedSecretKey;
+            if (savedToken) document.getElementById('aws-input-session-token').value = savedToken;
+            if (savedInstance) document.getElementById('aws-input-instance-type').value = savedInstance;
+        } else if (provider === 'AZURE') {
+            const savedSub = sessionStorage.getItem('tw_azure_subscription_id');
+            const savedTenant = sessionStorage.getItem('tw_azure_tenant_id');
+            const savedClient = sessionStorage.getItem('tw_azure_client_id');
+            const savedSecret = sessionStorage.getItem('tw_azure_client_secret');
+            const savedLoc = sessionStorage.getItem('tw_azure_location');
+            const savedVm = sessionStorage.getItem('tw_azure_vm_size');
+            const savedRg = sessionStorage.getItem('tw_azure_rg');
+
+            if (savedSub) document.getElementById('azure-input-subscription-id').value = savedSub;
+            if (savedTenant) document.getElementById('azure-input-tenant-id').value = savedTenant;
+            if (savedClient) document.getElementById('azure-input-client-id').value = savedClient;
+            if (savedSecret) document.getElementById('azure-input-client-secret').value = savedSecret;
+            if (savedLoc) document.getElementById('azure-input-location').value = savedLoc;
+            if (savedVm) document.getElementById('azure-input-vm-size').value = savedVm;
+            if (savedRg) document.getElementById('azure-input-rg').value = savedRg;
+        }
+    } catch (e) {}
+}
+
+function saveCredentialsToSession(provider, creds) {
+    try {
+        if (!burstChkRemember || !burstChkRemember.checked) return;
+        if (provider === 'AWS') {
+            sessionStorage.setItem('tw_aws_region', creds.region || '');
+            sessionStorage.setItem('tw_aws_access_key', creds.accessKeyId || '');
+            sessionStorage.setItem('tw_aws_secret_key', creds.secretAccessKey || '');
+            sessionStorage.setItem('tw_aws_session_token', creds.sessionToken || '');
+            sessionStorage.setItem('tw_aws_instance_type', creds.instanceType || '');
+        } else if (provider === 'AZURE') {
+            sessionStorage.setItem('tw_azure_subscription_id', creds.subscriptionId || '');
+            sessionStorage.setItem('tw_azure_tenant_id', creds.tenantId || '');
+            sessionStorage.setItem('tw_azure_client_id', creds.clientId || '');
+            sessionStorage.setItem('tw_azure_client_secret', creds.clientSecret || '');
+            sessionStorage.setItem('tw_azure_location', creds.location || '');
+            sessionStorage.setItem('tw_azure_vm_size', creds.vmSize || '');
+            sessionStorage.setItem('tw_azure_rg', creds.resourceGroupName || '');
+        }
+    } catch (e) {}
+}
+
+function selectProvider(provider) {
+    selectedCloudProvider = provider.toUpperCase();
+
+    if (burstFormFeedback) burstFormFeedback.style.display = 'none';
+
+    if (selectedCloudProvider === 'AWS') {
+        if (burstFormProviderBadge) {
+            burstFormProviderBadge.textContent = 'AWS';
+            burstFormProviderBadge.style.background = '#d97706';
+        }
+        if (burstFieldsAws) burstFieldsAws.style.display = 'block';
+        if (burstFieldsAzure) burstFieldsAzure.style.display = 'none';
+        if (btnOpenCloudTutorial) {
+            btnOpenCloudTutorial.href = '/tutorial-nuvem#aws';
+            btnOpenCloudTutorial.title = 'Abrir tutorial da AWS em nova janela';
+        }
+        loadSavedCredentials('AWS');
+    } else {
+        if (burstFormProviderBadge) {
+            burstFormProviderBadge.textContent = 'AZURE';
+            burstFormProviderBadge.style.background = '#0284c7';
+        }
+        if (burstFieldsAws) burstFieldsAws.style.display = 'none';
+        if (burstFieldsAzure) burstFieldsAzure.style.display = 'block';
+        if (btnOpenCloudTutorial) {
+            btnOpenCloudTutorial.href = '/tutorial-nuvem#azure';
+            btnOpenCloudTutorial.title = 'Abrir tutorial do Azure em nova janela';
+        }
+        loadSavedCredentials('AZURE');
+    }
+
+    showBurstView('form');
+}
+
+// Botões de abertura e navegação do modal
+if (btnBursting) {
+    btnBursting.addEventListener('click', openBurstModal);
+}
+if (btnSetupBurst) {
+    btnSetupBurst.addEventListener('click', openBurstModal);
+}
+
+if (cardSelectAws) {
+    cardSelectAws.addEventListener('click', () => selectProvider('AWS'));
+    cardSelectAws.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') selectProvider('AWS');
+    });
+}
+if (cardSelectAzure) {
+    cardSelectAzure.addEventListener('click', () => selectProvider('AZURE'));
+    cardSelectAzure.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') selectProvider('AZURE');
+    });
+}
+
+if (btnBurstCloseSelection) btnBurstCloseSelection.addEventListener('click', closeBurstModal);
+if (btnBurstCancelSelection) btnBurstCancelSelection.addEventListener('click', closeBurstModal);
+
+if (btnBurstFormBack) {
+    btnBurstFormBack.addEventListener('click', () => showBurstView('selection'));
+}
+if (btnBurstFormCancel) {
+    btnBurstFormCancel.addEventListener('click', closeBurstModal);
+}
+
+// Toggle de exibição de senha nos campos com olho
+document.querySelectorAll('.btn-toggle-eye').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const targetId = btn.getAttribute('data-target');
+        const inputEl = document.getElementById(targetId);
+        if (inputEl) {
+            if (inputEl.type === 'password') {
+                inputEl.type = 'text';
+                btn.textContent = '🙈';
+            } else {
+                inputEl.type = 'password';
+                btn.textContent = '👁️';
+            }
+        }
+    });
 });
+
+// Envio do Formulário de Credenciais
+if (burstCredentialsForm) {
+    burstCredentialsForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (burstFormFeedback) burstFormFeedback.style.display = 'none';
+
+        let credentials = {};
+
+        if (selectedCloudProvider === 'AWS') {
+            const region = document.getElementById('aws-input-region').value;
+            const accessKeyId = (document.getElementById('aws-input-access-key').value || '').trim();
+            const secretAccessKey = (document.getElementById('aws-input-secret-key').value || '').trim();
+            const sessionToken = (document.getElementById('aws-input-session-token').value || '').trim();
+            const instanceType = document.getElementById('aws-input-instance-type').value;
+
+            if (!accessKeyId || !secretAccessKey) {
+                if (burstFormFeedback) {
+                    burstFormFeedback.textContent = 'Por favor, informe a AWS Access Key ID e a Secret Access Key.';
+                    burstFormFeedback.style.display = 'block';
+                }
+                return;
+            }
+
+            credentials = { region, accessKeyId, secretAccessKey, instanceType };
+            if (sessionToken) credentials.sessionToken = sessionToken;
+        } else {
+            const subscriptionId = (document.getElementById('azure-input-subscription-id').value || '').trim();
+            const tenantId = (document.getElementById('azure-input-tenant-id').value || '').trim();
+            const clientId = (document.getElementById('azure-input-client-id').value || '').trim();
+            const clientSecret = (document.getElementById('azure-input-client-secret').value || '').trim();
+            const location = document.getElementById('azure-input-location').value;
+            const vmSize = document.getElementById('azure-input-vm-size').value;
+            const resourceGroupName = (document.getElementById('azure-input-rg').value || 'CloudBurstingRG').trim();
+
+            if (!subscriptionId || !tenantId || !clientId || !clientSecret) {
+                if (burstFormFeedback) {
+                    burstFormFeedback.textContent = 'Por favor, preencha todos os campos obrigatórios da Azure (Subscription, Tenant, Client ID e Secret).';
+                    burstFormFeedback.style.display = 'block';
+                }
+                return;
+            }
+
+            credentials = { subscriptionId, tenantId, clientId, clientSecret, location, vmSize, resourceGroupName };
+        }
+
+        saveCredentialsToSession(selectedCloudProvider, credentials);
+
+        // Prepara tela de progresso
+        const imageMeta = document.querySelector('meta[name="image"]');
+        const activeImage = imageMeta ? imageMeta.getAttribute('content') : null;
+
+        resetBurstModal();
+        if (burstProviderBadge) burstProviderBadge.textContent = selectedCloudProvider;
+        if (burstProgressSubtitle) {
+            burstProgressSubtitle.textContent = `Provisionando nó na nuvem ${selectedCloudProvider} e integrando via VPN...`;
+        }
+
+        showBurstView('progress');
+        socket.emit('burst:start', {
+            provider: selectedCloudProvider,
+            credentials,
+            image: activeImage
+        });
+    });
+}
 
 function logBurstConsole(msg) {
     if (!burstConsoleOutput) return;
@@ -727,37 +999,24 @@ function resetBurstModal() {
         setBurstStep(i, i === 1 ? 'active' : 'pending');
     }
     if (burstConsoleOutput) {
-        burstConsoleOutput.textContent = 'Iniciando expansão do cluster com as credenciais do ambiente...';
+        burstConsoleOutput.textContent = 'Iniciando expansão do cluster com as credenciais fornecidas...';
     }
     if (btnBurstFinish) btnBurstFinish.style.display = 'none';
     if (btnBurstCancel) btnBurstCancel.style.display = 'none';
-}
-
-if (btnBursting) {
-    btnBursting.addEventListener('click', () => {
-        if (isBurstConnected) {
-            AppModal.alert('Nuvem Externa', 'O nó na nuvem já está conectado e pronto para receber cargas no cluster!');
-            return;
-        }
-
-        const imageMeta = document.querySelector('meta[name="image"]');
-        const activeImage = imageMeta ? imageMeta.getAttribute('content') : null;
-
-        resetBurstModal();
-        if (burstModal) burstModal.style.display = 'flex';
-        socket.emit('burst:start', { image: activeImage });
-    });
+    if (btnBurstRetry) btnBurstRetry.style.display = 'none';
 }
 
 if (btnBurstFinish) {
-    btnBurstFinish.addEventListener('click', () => {
-        if (burstModal) burstModal.style.display = 'none';
-    });
+    btnBurstFinish.addEventListener('click', closeBurstModal);
 }
 
 if (btnBurstCancel) {
-    btnBurstCancel.addEventListener('click', () => {
-        if (burstModal) burstModal.style.display = 'none';
+    btnBurstCancel.addEventListener('click', closeBurstModal);
+}
+
+if (btnBurstRetry) {
+    btnBurstRetry.addEventListener('click', () => {
+        showBurstView('form');
     });
 }
 
@@ -765,27 +1024,32 @@ socket.on('burst:step', ({ step, message }) => {
     currentBurstStep = step;
     logBurstConsole(message);
 
-    // Marca todos os passos anteriores como sucesso
     for (let i = 1; i < step; i++) {
         setBurstStep(i, 'success');
     }
-    // Marca o passo atual como ativo
     setBurstStep(step, 'active');
 });
 
-socket.on('burst:complete', ({ nodeId, provider }) => {
+socket.on('burst:complete', ({ nodeId, nodeName, provider }) => {
     isBurstConnected = true;
+    connectedCloudProvider = provider || selectedCloudProvider;
     for (let i = 1; i <= 4; i++) {
         setBurstStep(i, 'success');
     }
-    logBurstConsole(`✅ Sucesso! Nó ${nodeId} (${provider}) integrado ao cluster MicroK8s.`);
+    const displayName = nodeName || nodeId;
+    logBurstConsole(`✅ Sucesso! Nó ${displayName} (${connectedCloudProvider}) integrado ao cluster MicroK8s.`);
 
     if (btnBurstFinish) btnBurstFinish.style.display = 'inline-block';
     if (btnBurstCancel) btnBurstCancel.style.display = 'none';
+    if (btnBurstRetry) btnBurstRetry.style.display = 'none';
 
     if (btnBursting) {
-        btnBursting.textContent = '☁️ Nuvem Conectada';
+        const textSpan = btnBursting.querySelector('.burst-btn-text');
+        if (textSpan) textSpan.textContent = `${connectedCloudProvider} Conectada`;
         btnBursting.classList.add('connected');
+    }
+    if (burstStatusBadge) {
+        burstStatusBadge.style.display = 'inline-block';
     }
 });
 
@@ -796,6 +1060,9 @@ socket.on('burst:error', ({ message }) => {
     if (btnBurstCancel) {
         btnBurstCancel.style.display = 'inline-block';
         btnBurstCancel.textContent = 'Fechar';
+    }
+    if (btnBurstRetry) {
+        btnBurstRetry.style.display = 'inline-block';
     }
     if (btnBurstFinish) btnBurstFinish.style.display = 'none';
 });

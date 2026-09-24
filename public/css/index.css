@@ -2,68 +2,123 @@
    1. BOTÕES (Estilos Globais e Agrupados)
    ========================================= */
 /* Base compartilhada para TODOS os botões da aplicação */
-.btn-danger, .btn-extend-24h, .init-terminal, #btn-extend, #btn-ignore, 
-#btn-reload, #btn-salvar-novo, #btn-salvar-atual, .btn-primary, .btn-machine {
+.btn-danger,
+.btn-extend-24h,
+.init-terminal,
+#btn-extend,
+#btn-ignore,
+#btn-reload,
+#btn-salvar-novo,
+#btn-salvar-atual,
+.btn-primary,
+.btn-machine {
     color: white;
     border: none;
     border-radius: 4px;
     cursor: pointer;
     font-weight: bold;
-    transition: background 0.3s; 
+    transition: background 0.3s;
 }
 
 /* Tamanhos e Paddings específicos */
-.btn-danger, .btn-extend-24h { padding: 8px 12px; }
-#btn-salvar-novo             { padding: 8px 15px; }
-#btn-salvar-atual            { padding: 6px 15px; }
-#btn-extend, #btn-ignore, #btn-reload, .btn-primary, #custom-modal-cancel {
+.btn-danger,
+.btn-extend-24h {
+    padding: 8px 12px;
+}
+
+#btn-salvar-novo {
+    padding: 8px 15px;
+}
+
+#btn-salvar-atual {
+    padding: 6px 15px;
+}
+
+#btn-extend,
+#btn-ignore,
+#btn-reload,
+.btn-primary,
+#custom-modal-cancel {
     padding: 10px 20px;
     font-size: 1rem;
 }
 
 /* Cores e Estados (Hover / Disabled) */
-.btn-danger, #btn-ignore        { background-color: var(--vermelho); } 
-.btn-danger:hover, #btn-ignore:hover  { background-color: var(--vermelho-contraste); }
-
-.btn-extend-24h, .init-terminal, .btn-download, .btn-outline, .btn-primary { 
-    background: var(--azul); 
+.btn-danger,
+#btn-ignore {
+    background-color: var(--vermelho);
 }
 
-.btn-extend-24h:hover, .init-terminal:hover, .btn-download:hover, .btn-outline:hover, .btn-primary:hover { 
-    background: var(--azul-contraste); 
+.btn-danger:hover,
+#btn-ignore:hover {
+    background-color: var(--vermelho-contraste);
 }
-.btn-extend-24h:disabled     { background-color: var(--cinza); cursor: not-allowed; }
 
-.btn-machine { 
-    background: var(--cinza-claro); 
+.btn-extend-24h,
+.init-terminal,
+.btn-download,
+.btn-outline,
+.btn-primary {
+    background: var(--azul);
+}
+
+.btn-extend-24h:hover,
+.init-terminal:hover,
+.btn-download:hover,
+.btn-outline:hover,
+.btn-primary:hover {
+    background: var(--azul-contraste);
+}
+
+.btn-extend-24h:disabled {
+    background-color: var(--cinza);
+    cursor: not-allowed;
+}
+
+.btn-machine {
+    background: var(--cinza-claro);
     color: black;
-    font-weight: 200; 
+    font-weight: 200;
 }
 
-.btn-machine:hover { 
+.btn-machine:hover {
     background: var(--cinza);
 }
 
-.btn-machine:disabled { 
-    background: var(--cinza-destaque); 
+.btn-machine:disabled {
+    background: var(--cinza-destaque);
 }
 
 
 
-#btn-extend, #btn-salvar-novo { 
-    background: var(--verde); 
-    margin-right: 10px; 
+#btn-extend,
+#btn-salvar-novo {
+    background: var(--verde);
+    margin-right: 10px;
 }
 
-#btn-extend:hover, #btn-salvar-novo:hover {
+#btn-extend:hover,
+#btn-salvar-novo:hover {
     background: var(--verde-contraste);
 }
 
-#btn-salvar-atual, .btn-info  { background: var(--azul-petroleo); }
-#btn-salvar-atual:hover, .btn-info:hover  { background: var(--azul-petroleo-contraste); }
+#btn-salvar-atual,
+.btn-info {
+    background: var(--azul-petroleo);
+}
 
-#btn-reload        { margin-top: 20px; }
-#btn-ignore        { margin-top: 10px; }
+#btn-salvar-atual:hover,
+.btn-info:hover {
+    background: var(--azul-petroleo-contraste);
+}
+
+#btn-reload {
+    margin-top: 20px;
+}
+
+#btn-ignore {
+    margin-top: 10px;
+}
 
 /* Botões genéricos sem classe */
 button {
@@ -75,18 +130,21 @@ button {
    2. CONTAINERS E PAINEIS
    ========================================= */
 /* Base compartilhada para os blocos de informação */
-#machine-info, #backup-ui {
-    width: 50%; 
+#machine-info,
+#backup-ui {
+    width: 50%;
     box-sizing: border-box;
-    margin: 15px 0; 
-    background: var(--cor-terminal); 
-    padding: 15px; 
-    border-radius: 8px; 
+    margin: 15px 0;
+    background: var(--cor-terminal);
+    padding: 15px;
+    border-radius: 8px;
     border: 1px solid var(--cinza-borda);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
 }
 
-#backup-ui { display: none; }
+#backup-ui {
+    display: none;
+}
 
 #setup-container {
     margin-top: 70px;
@@ -99,9 +157,9 @@ button {
 }
 
 #container-principal {
-    display: flex; 
-    width: 100%; 
-    height: 100%; 
+    display: flex;
+    width: 100%;
+    height: 100%;
     gap: 10px;
 }
 
@@ -114,8 +172,8 @@ button {
     width: 100%;
     height: 80vh;
     background-color: var(--cor-terminal);
-    padding: 15px;             
-    
+    padding: 15px;
+
     border-radius: 12px;
     border: 1px solid var(--cinza-borda);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
@@ -133,40 +191,48 @@ button {
 }
 
 #area-salvar-atual {
-    display: none; 
-    margin-bottom: 15px; 
-    background: var(--cinza-destaque); 
-    padding: 10px; 
-    border-radius: 4px; 
-    align-items: center; 
+    display: none;
+    margin-bottom: 15px;
+    background: var(--cinza-destaque);
+    padding: 10px;
+    border-radius: 4px;
+    align-items: center;
     justify-content: space-between;
 }
 
 /* =========================================
    3. MODAIS
    ========================================= */
-#session-modal, #expired-modal, #custom-modal {
-    display: none; 
-    position: fixed; 
-    top: 0; left: 0; 
-    width: 100%; height: 100%; 
-    background: rgba(0,0,0,0.8); 
-    z-index: 1000; 
-    justify-content: center; 
+#session-modal,
+#expired-modal,
+#custom-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    z-index: 1000;
+    justify-content: center;
     align-items: center;
 }
 
-.session-content, .expired-content, .custom-modal-content {
+.session-content,
+.expired-content,
+.custom-modal-content {
     background: var(--cinza-destaque);
-    padding: 30px; 
-    border-radius: 8px; 
-    text-align: center; 
-    border: 2px solid var(--laranja); 
-    max-width: 400px; 
+    padding: 30px;
+    border-radius: 8px;
+    text-align: center;
+    border: 2px solid var(--laranja);
+    max-width: 400px;
     color: white;
 }
 
-.session-content h2, .expired-content h2, .custom-modal-content h2 {
+.session-content h2,
+.expired-content h2,
+.custom-modal-content h2 {
     color: var(--laranja);
 }
 
@@ -177,7 +243,8 @@ button {
 /* =========================================
    4. COMPONENTES MENORES (Inputs, Listas, Timers)
    ========================================= */
-input, #select-backup {
+input,
+#select-backup {
     padding: 10px;
     font-weight: 500;
     margin-right: 10px;
@@ -191,61 +258,64 @@ input, #select-backup {
 
 #nome-backup {
     flex: 1;
-    padding: 8px; 
-    border-radius: 4px; 
-    border: 1px solid var(--cinza-borda); 
-    background: #111; 
+    padding: 8px;
+    border-radius: 4px;
+    border: 1px solid var(--cinza-borda);
+    background: #111;
     color: white;
 }
 
 .input-backup {
-    display: flex; 
+    display: flex;
     gap: 10px;
 }
 
 /* Lista de Máquinas */
 #machine-list {
-    list-style: none; 
-    padding: 0; 
-    margin: 10px 0 0 0; 
-    display: flex; 
-    flex-wrap: wrap; 
+    list-style: none;
+    padding: 0;
+    margin: 10px 0 0 0;
+    display: flex;
+    flex-wrap: wrap;
     gap: 10px;
 }
 
 #download-list {
-    list-style: none; 
+    list-style: none;
     padding: 0;
 }
 
-.my-files { font-size: 1rem; color: #ddd; }
+.my-files {
+    font-size: 1rem;
+    color: #ddd;
+}
 
 .files {
-    margin-top: 20px; 
-    border-top: 1px solid var(--cinza-borda); 
-    padding-top: 10px; 
+    margin-top: 20px;
+    border-top: 1px solid var(--cinza-borda);
+    padding-top: 10px;
     text-align: left;
 }
 
 .backup-container {
-    display: flex; 
-    justify-content: space-between; 
-    align-items: center; 
-    margin-bottom: 15px;  
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
 }
 
 #status-cota {
-    color: #aaa; 
-    background: #222; 
-    padding: 5px 10px; 
-    border-radius: 15px; 
-    border: 1px solid var(--cinza-borda); 
+    color: #aaa;
+    background: #222;
+    padding: 5px 10px;
+    border-radius: 15px;
+    border: 1px solid var(--cinza-borda);
     font-size: 0.85em;
 }
 
 /* Lógica do Temporizador */
 #timer-bar {
-    display: none; 
+    display: none;
     align-items: center;
     gap: 15px;
     font-weight: bold;
@@ -261,51 +331,58 @@ input, #select-backup {
 }
 
 @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: 0.7; }
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.7;
+    }
 }
 
 /* =========================================
    5. Backups
    ========================================= */
 .backup-list-item {
-    background: #333; 
-    margin-bottom: 5px; 
-    padding: 10px; 
-    border-radius: 4px; 
+    background: #333;
+    margin-bottom: 5px;
+    padding: 10px;
+    border-radius: 4px;
     border: 1px solid #444;
 }
 
 .backup-item-header {
-    display: flex; 
-    justify-content: space-between; 
+    display: flex;
+    justify-content: space-between;
     align-items: center;
 }
 
 .backup-title {
-    font-weight:bold; 
-    color:#f1f1f1;
+    font-weight: bold;
+    color: #f1f1f1;
 }
 
 .backup-size {
-    color:#aaa; 
-    font-weight:normal;
+    color: #aaa;
+    font-weight: normal;
 }
 
 .btn-sm {
-    color:white; 
-    border:none; 
-    padding:6px 12px; 
-    cursor:pointer; 
-    border-radius:4px; 
-    font-size: 0.8em; 
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 0.8em;
     margin-right: 5px;
     font-weight: bold;
 }
 
 .tree-container {
-    margin-top: 10px; 
-    padding-left: 10px; 
+    margin-top: 10px;
+    padding-left: 10px;
     border-left: 1px solid #555;
 }
 
@@ -320,8 +397,8 @@ input, #select-backup {
 }
 
 .tree-folder-header {
-    display: flex; 
-    justify-content: space-between; 
+    display: flex;
+    justify-content: space-between;
     align-items: center;
 }
 
@@ -332,20 +409,21 @@ input, #select-backup {
 }
 
 .tree-folder-name {
-    cursor: pointer; 
+    cursor: pointer;
     color: #f3ff4d;
     flex: 1;
 }
 
 .tree-file {
-    padding: 3px 0; 
-    display: flex; 
+    padding: 3px 0;
+    display: flex;
     justify-content: space-between;
     align-items: center;
     border-radius: 4px;
 }
 
-.tree-file:hover, .tree-folder-header:hover {
+.tree-file:hover,
+.tree-folder-header:hover {
     background: #444;
 }
 
@@ -354,9 +432,9 @@ input, #select-backup {
 }
 
 .btn-outline {
-    cursor: pointer; 
-    padding: 6px 12px; 
-    font-size: 0.7em; 
+    cursor: pointer;
+    padding: 6px 12px;
+    font-size: 0.7em;
     border-radius: 5px;
     font-weight: bold;
     border: none;
@@ -367,95 +445,570 @@ input, #select-backup {
    7. MODAL DE CLOUD BURSTING
    ========================================= */
 .modal-overlay {
-    position: fixed; 
-    top: 0; 
-    left: 0; 
-    width: 100%; 
-    height: 100%; 
-    background: rgba(0, 0, 0, 0.8); 
-    display: flex; 
-    justify-content: center; 
-    align-items: center; 
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.82);
+    display: flex;
+    justify-content: center;
+    align-items: center;
     z-index: 1000;
-    backdrop-filter: blur(3px);
+    backdrop-filter: blur(4px);
+    animation: fadeInModal 0.2s ease-out;
+}
+
+@keyframes fadeInModal {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
 }
 
 .burst-modal-content {
-    background: var(--cor-terminal); 
-    border: 1px solid var(--cinza-borda); 
-    border-radius: 8px; 
-    width: 90%; 
-    max-width: 560px; 
-    padding: 25px 30px; 
-    box-shadow: 0 15px 40px rgba(0, 0, 0, 0.85); 
+    background: #1c1c1e;
+    border: 1px solid #38383a;
+    border-radius: 12px;
+    width: 92%;
+    max-width: 640px;
+    max-height: 90vh;
+    overflow-y: auto;
+    padding: 26px 30px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9);
     color: #f1f1f1;
+    position: relative;
+    box-sizing: border-box;
 }
 
 .burst-modal-header {
-    display: flex; 
-    justify-content: space-between; 
-    align-items: center; 
-    margin-bottom: 5px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.header-title-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.header-back-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
 .burst-modal-header h2 {
     margin: 0;
-    font-size: 1.4rem;
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.burst-close-btn {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 1.6rem;
+    line-height: 1;
+    padding: 2px 6px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: color 0.2s, background 0.2s;
+}
+
+.burst-close-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.btn-back-step {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid #444;
+    color: #cbd5e1;
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-back-step:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+}
+
+.badge-feature {
+    background: rgba(59, 130, 246, 0.18);
+    color: #60a5fa;
+    border: 1px solid rgba(59, 130, 246, 0.35);
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 .badge-provider {
-    background: var(--azul); 
-    color: white; 
-    padding: 4px 12px; 
-    border-radius: 12px; 
-    font-size: 0.8rem; 
-    font-weight: bold; 
-    text-transform: uppercase; 
+    background: #0284c7;
+    color: white;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: bold;
+    text-transform: uppercase;
     letter-spacing: 0.5px;
 }
 
 .burst-subtitle {
-    color: #aaa; 
-    margin: 0 0 18px 0; 
-    font-size: 0.9rem; 
+    color: #94a3b8;
+    margin: 0 0 20px 0;
+    font-size: 0.92rem;
+    line-height: 1.45;
+}
+
+/* =========================================
+   PROVIDER CARDS (SELEÇÃO AWS / AZURE)
+   ========================================= */
+.provider-cards-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.provider-card {
+    background: #252528;
+    border: 2px solid #333338;
+    border-radius: 10px;
+    padding: 20px 18px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.provider-card:hover,
+.provider-card:focus {
+    transform: translateY(-3px);
+    border-color: #3b82f6;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
+    background: #2b2b2f;
+}
+
+#card-select-aws:hover {
+    border-color: #f59e0b;
+    box-shadow: 0 10px 25px rgba(245, 158, 11, 0.2);
+}
+
+#card-select-azure:hover {
+    border-color: #0078d4;
+    box-shadow: 0 10px 25px rgba(0, 120, 212, 0.25);
+}
+
+.provider-card-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.provider-icon-badge {
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.aws-brand {
+    background: rgba(245, 158, 11, 0.15);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.azure-brand {
+    background: rgba(0, 120, 212, 0.15);
+    border: 1px solid rgba(0, 120, 212, 0.3);
+}
+
+.provider-card-emoji {
+    font-size: 1.5rem;
+}
+
+.provider-card-title h3 {
+    margin: 0 0 6px 0;
+    font-size: 1.15rem;
+    color: #ffffff;
+}
+
+.provider-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.badge-chip {
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    letter-spacing: 0.3px;
+}
+
+.chip-aws {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+}
+
+.chip-azure {
+    background: rgba(56, 189, 248, 0.2);
+    color: #7dd3fc;
+}
+
+.provider-card-desc {
+    color: #cbd5e1;
+    font-size: 0.85rem;
+    line-height: 1.45;
+    margin: 0 0 16px 0;
+    flex-grow: 1;
+}
+
+.btn-select-provider {
+    width: 100%;
+    padding: 10px 14px;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+}
+
+.btn-select-aws {
+    background: #d97706;
+    color: #ffffff;
+}
+
+.btn-select-aws:hover {
+    background: #b45309;
+}
+
+.btn-select-azure {
+    background: #0284c7;
+    color: #ffffff;
+}
+
+.btn-select-azure:hover {
+    background: #0369a1;
+}
+
+/* =========================================
+   TUTORIAL BANNER (NO TOPO DO FORMULÁRIO)
+   ========================================= */
+.cloud-tutorial-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%);
+    border: 1px solid #3b82f6;
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.tutorial-banner-icon {
+    font-size: 1.6rem;
+    line-height: 1;
+}
+
+.tutorial-banner-body {
+    flex: 1;
+}
+
+.tutorial-banner-body strong {
+    display: block;
+    color: #60a5fa;
+    font-size: 0.92rem;
+    margin-bottom: 2px;
+}
+
+.tutorial-banner-body p {
+    margin: 0;
+    color: #94a3b8;
+    font-size: 0.82rem;
+    line-height: 1.35;
+}
+
+.btn-tutorial-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #2563eb;
+    color: #ffffff !important;
+    text-decoration: none;
+    font-size: 0.84rem;
+    font-weight: 700;
+    padding: 8px 14px;
+    border-radius: 6px;
+    white-space: nowrap;
+    transition: all 0.2s;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.35);
+}
+
+.btn-tutorial-action:hover {
+    background: #1d4ed8;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.5);
+}
+
+.external-arrow {
+    font-size: 1rem;
+    line-height: 1;
+}
+
+/* =========================================
+   FORMULÁRIOS DE CREDENCIAIS
+   ========================================= */
+.provider-form-section {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin-bottom: 16px;
+}
+
+.form-row-2col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.form-row-3col {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    text-align: left;
+    padding-top: 10px;
+}
+
+.form-group label {
+    font-size: 0.84rem;
+    font-weight: 600;
+    color: #cbd5e1;
+}
+
+.form-group label .req {
+    color: #f87171;
+}
+
+.label-with-hint {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.badge-optional-academy {
+    font-size: 0.72rem;
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+.cloud-input-field {
+    width: 100%;
+    box-sizing: border-box;
+    background: #111113;
+    border: 1px solid #38383c;
+    border-radius: 6px;
+    padding: 9px 12px;
+    color: #f1f5f9;
+    font-size: 0.88rem;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    font-family: inherit;
+}
+
+.cloud-input-field:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+    background: #161619;
+}
+
+.cloud-textarea {
+    resize: vertical;
+    min-height: 64px;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.8rem;
     line-height: 1.4;
 }
 
+.input-password-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.input-password-container .cloud-input-field {
+    padding-right: 38px;
+}
+
+.btn-toggle-eye {
+    position: absolute;
+    right: 6px;
+    background: none;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 6px;
+    line-height: 1;
+    border-radius: 4px;
+    transition: color 0.2s;
+}
+
+.btn-toggle-eye:hover {
+    color: #fff;
+}
+
+.field-help-text {
+    font-size: 0.78rem;
+    color: #94a3b8;
+    line-height: 1.4;
+}
+
+.field-help-text code {
+    background: #000;
+    color: #38bdf8;
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-size: 0.76rem;
+}
+
+.burst-form-alert {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #fca5a5;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    margin-bottom: 14px;
+}
+
+.form-remember-row {
+    margin: 10px 0 18px 0;
+    text-align: left;
+}
+
+.checkbox-remember {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.84rem;
+    color: #cbd5e1;
+    cursor: pointer;
+    user-select: none;
+}
+
+.checkbox-remember input {
+    cursor: pointer;
+    accent-color: #3b82f6;
+}
+
+.btn-secondary {
+    background: #333338;
+    color: #e2e8f0;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 9px 18px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-secondary:hover {
+    background: #44444c;
+    color: #fff;
+}
+
+.btn-submit-burst {
+    background: linear-gradient(135deg, #0284c7 0%, #2563eb 100%);
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 22px;
+    font-size: 0.92rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+}
+
+.btn-submit-burst:hover {
+    background: linear-gradient(135deg, #0369a1 0%, #1d4ed8 100%);
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.5);
+    transform: translateY(-1px);
+}
+
+/* =========================================
+   ETAPA 3: PROGRESSO E LOGS
+   ========================================= */
 .burst-steps {
-    display: flex; 
-    flex-direction: column; 
-    gap: 10px; 
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
     margin-bottom: 18px;
 }
 
 .burst-step {
-    display: flex; 
-    align-items: center; 
-    gap: 14px; 
-    padding: 10px 14px; 
-    background: #252525; 
-    border: 1px solid var(--cinza-destaque); 
-    border-radius: 6px; 
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 14px;
+    background: #252528;
+    border: 1px solid #333338;
+    border-radius: 6px;
     transition: all 0.3s ease;
 }
 
 .step-indicator {
-    width: 26px; 
-    height: 26px; 
-    border-radius: 50%; 
-    display: flex; 
-    align-items: center; 
-    justify-content: center; 
-    font-weight: bold; 
-    font-size: 0.85rem; 
-    background: var(--cinza-destaque); 
-    color: #888; 
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 0.85rem;
+    background: var(--cinza-destaque);
+    color: #888;
     flex-shrink: 0;
 }
 
 .step-info {
     display: flex;
     flex-direction: column;
+    text-align: left;
 }
 
 .step-info strong {
@@ -483,6 +1036,10 @@ input, #select-backup {
 .burst-step.step-active .step-indicator {
     background: var(--azul);
     color: white;
+}
+
+.burst-step.step-active .step-info strong {
+    color: #fff;
 }
 
 .burst-step.step-success {
@@ -518,17 +1075,22 @@ input, #select-backup {
 }
 
 @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
 }
 
 .burst-console-box {
-    background: #111; 
-    border: 1px solid #333; 
-    border-radius: 6px; 
-    padding: 10px 14px; 
-    margin-bottom: 15px; 
-    font-family: "Fira Code", monospace, sans-serif;
+    background: #111113;
+    border: 1px solid #333338;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 15px;
+    font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
 .burst-console-title {
@@ -537,29 +1099,147 @@ input, #select-backup {
     margin-bottom: 6px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    text-align: left;
 }
 
 #burst-console-output {
-    margin: 0; 
-    font-size: 0.82rem; 
-    color: #50fa7b; 
-    max-height: 90px; 
-    overflow-y: auto; 
-    white-space: pre-wrap; 
+    margin: 0;
+    font-size: 0.82rem;
+    color: #50fa7b;
+    max-height: 90px;
+    overflow-y: auto;
+    white-space: pre-wrap;
     line-height: 1.4;
+    text-align: left;
 }
 
 .burst-modal-footer {
-    display: flex; 
-    justify-content: flex-end; 
+    display: flex;
+    justify-content: flex-end;
     gap: 10px;
 }
 
-#bursting.connected {
-    background: var(--verde);
-    color: white;
+/* =========================================
+   BOTÃO NA BARRA DE NAVEGAÇÃO E CALLOUT
+   ========================================= */
+.btn-cloud-burst {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: linear-gradient(135deg, #0284c7 0%, #2563eb 60%, #4f46e5 100%);
+    color: #ffffff !important;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 20px;
+    padding: 6px 16px;
+    font-size: 0.92rem;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(2, 132, 199, 0.4);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    letter-spacing: 0.2px;
 }
 
-#bursting.connected:hover {
-    background: var(--verde-contraste);
+.btn-cloud-burst:hover {
+    background: linear-gradient(135deg, #0369a1 0%, #1d4ed8 60%, #4338ca 100%);
+    box-shadow: 0 4px 16px rgba(2, 132, 199, 0.65);
+    transform: translateY(-1px);
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.btn-cloud-burst:active {
+    transform: translateY(0);
+}
+
+.btn-cloud-burst .burst-btn-icon {
+    font-size: 1.1rem;
+    line-height: 1;
+}
+
+.burst-status-dot {
+    width: 8px;
+    height: 8px;
+    background-color: #34d399;
+    border-radius: 50%;
+    box-shadow: 0 0 6px #34d399;
+    animation: pulseDot 2s infinite;
+}
+
+@keyframes pulseDot {
+    0% {
+        transform: scale(0.95);
+        opacity: 0.8;
+    }
+
+    50% {
+        transform: scale(1.2);
+        opacity: 1;
+    }
+
+    100% {
+        transform: scale(0.95);
+        opacity: 0.8;
+    }
+}
+
+.btn-cloud-burst.connected {
+    background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+    border-color: rgba(52, 211, 153, 0.5);
+    box-shadow: 0 2px 12px rgba(16, 185, 129, 0.45);
+}
+
+.btn-cloud-burst.connected:hover {
+    background: linear-gradient(135deg, #047857 0%, #059669 100%);
+    box-shadow: 0 4px 18px rgba(16, 185, 129, 0.7);
+}
+
+/* Callout na tela de setup */
+.setup-burst-banner {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(30, 41, 59, 0.6);
+    border: 1px dashed rgba(59, 130, 246, 0.4);
+    border-radius: 8px;
+    padding: 8px 16px;
+    margin-top: 18px;
+    font-size: 0.88rem;
+    color: #94a3b8;
+}
+
+.btn-setup-burst-link {
+    background: none;
+    border: none;
+    color: #60a5fa;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 4px;
+    text-decoration: underline;
+    transition: color 0.2s, background 0.2s;
+}
+
+.btn-setup-burst-link:hover {
+    color: #93c5fd;
+    background: rgba(59, 130, 246, 0.15);
+}
+
+@media (max-width: 600px) {
+    .provider-cards-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .form-row-2col,
+    .form-row-3col {
+        grid-template-columns: 1fr;
+    }
+
+    .cloud-tutorial-banner {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .btn-tutorial-action {
+        width: 100%;
+        justify-content: center;
+    }
 }

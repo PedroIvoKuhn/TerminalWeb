@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tutorial de Credenciais de Nuvem - Terminal Web</title>
+    <link rel="stylesheet" href="/css/global.css"/>
+    <link rel="stylesheet" href="/css/cloudTutorial.css"/>
+    <link rel="icon" type="image/png" href="/favicon.png">
+</head>
+<body>
+    <nav>
+        <ul class="nav-links">
+            <li><a href="/">Home</a></li>
+            <li><a href="/how-use">Como usar</a></li>
+            <li><a href="/tutorial-nuvem" class="active">Tutorial de Credenciais</a></li>
+        </ul>
+        <div class="nav-actions">
+            <a href="/" class="btn-back-app">&#8592; Voltar ao Terminal</a>
+        </div>
+    </nav>
+
+    <main class="tutorial-wrapper">
+        <header class="tutorial-hero">
+            <div class="hero-badge">Guia Oficial &bull; Cloud Bursting</div>
+            <h1>Como Obter Credenciais para Expansão na Nuvem</h1>
+            <p class="hero-lead">
+                O <strong>Terminal Web</strong> permite expandir seu cluster conectando máquinas virtuais externas na 
+                <strong>AWS</strong> ou na <strong>Microsoft Azure For Students</strong>. Siga este tutorial passo a passo 
+                para obter as credenciais da sua conta ou laboratório acadêmico.
+            </p>
+
+            <div class="security-callout">
+                <span class="security-icon">&#128274;</span>
+                <div>
+                    <strong>Privacidade e Segurança:</strong>
+                    <span>Suas credenciais são processadas em memória e utilizadas exclusivamente para provisionar a instância temporária do seu cluster e descartá-la ao término da sua sessão.</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Seletor de Abas de Provedor -->
+        <div class="tabs-nav-container">
+            <div class="tabs-nav" role="tablist">
+                <button type="button" class="tab-btn active" id="tab-btn-aws" data-target="content-aws" role="tab" aria-selected="true">
+                    <span class="tab-logo aws-logo">&#9729;</span>
+                    <span class="tab-text">
+                        <strong>Amazon AWS</strong>
+                        <small>Console AWS &bull; Até $200 Crédito (6 meses) &bull; IAM</small>
+                    </span>
+                </button>
+                <button type="button" class="tab-btn" id="tab-btn-azure" data-target="content-azure" role="tab" aria-selected="false">
+                    <span class="tab-logo azure-logo">&#9670;</span>
+                    <span class="tab-text">
+                        <strong>Azure For Students</strong>
+                        <small>Microsoft Entra ID & Service Principal</small>
+                    </span>
+                </button>
+            </div>
+        </div>
+
+        <!-- ============================================================== -->
+        <!-- CONTEÚDO: AWS                                                  -->
+        <!-- ============================================================== -->
+        <section id="content-aws" class="tab-pane active" role="tabpanel">
+            <div class="provider-banner aws-theme">
+                <div class="provider-badge-pill">Amazon Web Services &bull; Console Oficial</div>
+                <h2>Conectando com a Conta Normal da AWS</h2>
+                <p>
+                    Utilize sua conta padrão do <strong>Console da AWS</strong> aproveitando o benefício de 
+                    <strong>até US$ 200 em créditos promocionais válidos por 6 meses</strong>, além do 
+                    <strong>Nível Gratuito (AWS Free Tier)</strong> de até 750 horas mensais para instâncias EC2.
+                </p>
+            </div>
+
+            <!-- PASSO A PASSO PRINCIPAL: IAM E CHAVES -->
+            <article class="tutorial-card highlight-card">
+                <div class="card-header">
+                    <span class="scenario-tag iam-tag">Passo a Passo Oficial</span>
+                    <h3>Como Gerar suas Chaves de Acesso (IAM) no Console da AWS</h3>
+                </div>
+                <p class="card-desc">
+                    Para que o Terminal Web possa se conectar de forma segura à sua conta AWS para criar a máquina virtual 
+                    e destruí-la ao final da sessão, criamos um usuário com chaves de acesso no serviço <strong>IAM</strong>:
+                </p>
+
+                <div class="steps-list">
+                    <div class="step-card">
+                        <div class="step-number">1</div>
+                        <div class="step-body">
+                            <h4>Acesse o Console da AWS</h4>
+                            <p>Entre no <a href="https://console.aws.amazon.com/" target="_blank" rel="noopener noreferrer">Console de Gerenciamento da AWS</a> com o e-mail e senha da sua conta normal.</p>
+                            <div class="step-tip">&#128161; <strong>Dica de Região:</strong> No canto superior direito do console, selecione a região desejada. Recomendamos <code>sa-east-1 (São Paulo)</code> para menor latência ou <code>us-east-1 (N. Virginia)</code> para maior disponibilidade de instâncias Free Tier.</div>
+                        </div>
+                    </div>
+
+                    <div class="step-card">
+                        <div class="step-number">2</div>
+                        <div class="step-body">
+                            <h4>Acesse o Serviço IAM</h4>
+                            <p>Na barra de pesquisa no topo do console, digite <code>IAM</code> e clique no serviço <strong>IAM (Gerenciamento de Identidade e Acesso)</strong>.</p>
+                            <p class="field-help-text">O IAM permite criar credenciais com permissões restritas exclusivamente para computação (EC2), sem expor a senha principal da sua conta.</p>
+                        </div>
+                    </div>
+
+                    <div class="step-card">
+                        <div class="step-number">3</div>
+                        <div class="step-body">
+                            <h4>Criar um Usuário para o Terminal Web</h4>
+                            <ol class="substeps-list">
+                                <li>No menu lateral esquerdo do IAM, clique em <strong>Usuários (Users)</strong>.</li>
+                                <li>Clique no botão azul <strong>Criar usuário (Create user)</strong>.</li>
+                                <li>Digite um nome identificador, como: <code>TerminalWeb-Worker</code>.</li>
+                                <li><strong>Importante:</strong> Deixe <em>desmarcada</em> a opção de fornecer acesso ao Console web (este usuário precisa apenas de acesso programático via API).</li>
+                                <li>Clique em <strong>Avançar</strong>.</li>
+                            </ol>
+                        </div>
+                    </div>
+
+                    <div class="step-card">
+                        <div class="step-number">4</div>
+                        <div class="step-body">
+                            <h4>Definir Permissão de EC2 (AmazonEC2FullAccess)</h4>
+                            <ol class="substeps-list">
+                                <li>Na tela de opções de permissão, selecione <strong>Anexar políticas diretamente (Attach policies directly)</strong>.</li>
+                                <li>Na caixa de busca de políticas, digite: <code>AmazonEC2FullAccess</code>.</li>
+                                <li>Marque a caixinha de seleção ao lado da política <strong>AmazonEC2FullAccess</strong>.</li>
+                                <li>Clique em <strong>Avançar</strong> e depois clique em <strong>Criar usuário (Create user)</strong>.</li>
+                            </ol>
+                            <div class="step-tip">&#10004; Esta permissão autoriza o Terminal Web a provisionar a máquina virtual, anexar regras de rede segura e terminar a instância ao fim da sua aula.</div>
+                        </div>
+                    </div>
+
+                    <div class="step-card">
+                        <div class="step-number">5</div>
+                        <div class="step-body">
+                            <h4>Gerar a Chave de Acesso (Access Key ID & Secret)</h4>
+                            <ol class="substeps-list">
+                                <li>Na lista de usuários do IAM, clique no nome do usuário criado (<code>TerminalWeb-Worker</code>).</li>
+                                <li>Clique na aba <strong>Credenciais de segurança (Security credentials)</strong>.</li>
+                                <li>Role até a seção <strong>Chaves de acesso (Access keys)</strong> e clique em <strong>Criar chave de acesso (Create access key)</strong>.</li>
+                                <li>Em "Caso de uso", selecione <strong>Interface da Linha de Comando (CLI)</strong> ou <strong>Código em execução fora da AWS</strong>.</li>
+                                <li>Marque a caixa de confirmação de compreensão e clique em <strong>Avançar</strong>.</li>
+                                <li>Clique no botão <strong>Criar chave de acesso</strong>.</li>
+                            </ol>
+                            <div class="warning-box">
+                                <span class="warning-icon">&#9888;</span>
+                                <div>
+                                    <strong>Copie suas Chaves Agora:</strong>
+                                    <p>A AWS exibirá a <strong>Chave de Acesso (Access Key ID)</strong> e a <strong>Chave de Acesso Secreta (Secret Access Key)</strong>. Clique em "Mostrar" para revelar o segredo e copie ambos os valores. Recomendamos também clicar em <em>Baixar arquivo .csv</em>.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="step-card">
+                        <div class="step-number">6</div>
+                        <div class="step-body">
+                            <h4>Preencher no Terminal Web</h4>
+                            <p>Agora retorne ao formulário no Terminal Web e informe:</p>
+                            <ul class="fields-guide-list">
+                                <li><strong>Região AWS:</strong> selecione <code>sa-east-1 (São Paulo)</code> ou <code>us-east-1 (N. Virginia)</code>.</li>
+                                <li><strong>Tipo de Instância:</strong> selecione <code>t2.micro</code> ou <code>t3.micro</code> (ambas cobertas pelo Free Tier gratuito).</li>
+                                <li><strong>AWS Access Key ID:</strong> cole a chave que inicia com <code>AKIA...</code> gerada no Passo 5.</li>
+                                <li><strong>AWS Secret Access Key:</strong> cole a sua chave secreta.</li>
+                                <li><strong>AWS Session Token:</strong> <em>DEIXE EM BRANCO</em> (contas normais com usuário IAM utilizam apenas chave e segredo).</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </article>
+
+            <!-- CARD DE DICAS: NÍVEL GRATUITO E CRÉDITOS INICIAIS DE ATÉ $200 -->
+            <article class="tutorial-card">
+                <div class="card-header">
+                    <span class="scenario-tag academy-tag">Economia & Boas Práticas</span>
+                    <h3>Como Funcionam os Créditos Iniciais de até $200 (6 Meses) e o Free Tier</h3>
+                </div>
+                <div class="faq-accordion">
+                    <div class="faq-box">
+                        <strong>Até US$ 200 em Créditos Promocionais (Validade de 6 Meses):</strong>
+                        <p>A AWS oferece novos programas de incentivo para novos cadastros e desenvolvedores com até <strong>US$ 200 em créditos promocionais</strong> válidos por <strong>6 meses</strong> após a ativação. Esse saldo cobre amplamente quaisquer custos de computação (EC2), discos EBS e tráfego de rede durante as aulas e laboratórios do semestre.</p>
+                    </div>
+                    <div class="faq-box">
+                        <strong>Como Visualizar ou Resgatar seus Créditos no Console:</strong>
+                        <p>No Console da AWS, acesse o painel <strong>Faturamento e Gerenciamento de Custos (Billing and Cost Management)</strong>. No menu lateral esquerdo, clique em <strong>Créditos (Credits)</strong> para conferir o saldo disponível e a data exata de vencimento (6 meses). Se você recebeu um voucher ou código de evento/parceria universitária, basta clicar em <em>Resgatar crédito (Redeem credit)</em>.</p>
+                    </div>
+                    <div class="faq-box">
+                        <strong>750 Horas Gratuitas por Mês (EC2 Free Tier):</strong>
+                        <p>Junto aos créditos, a AWS concede 750 horas por mês de instâncias Linux <code>t2.micro</code> ou <code>t3.micro</code> no Free Tier. O Terminal Web já vem pré-configurado com esses tamanhos para que seus créditos fiquem intactos ou durem o máximo possível.</p>
+                    </div>
+                    <div class="faq-box">
+                        <strong>Destruição Automática ao Encerrar:</strong>
+                        <p>Assim que sua sessão expira ou você clica em <em>Encerrar Sessão</em>, o Terminal Web desliga e exclui (<code>terminate</code>) imediatamente a instância na AWS, consumindo apenas os minutos exatos em que você realizou seus experimentos.</p>
+                    </div>
+                </div>
+            </article>
+        </section>
+
+        <!-- ============================================================== -->
+        <!-- CONTEÚDO: AZURE FOR STUDENTS                                   -->
+        <!-- ============================================================== -->
+        <section id="content-azure" class="tab-pane" role="tabpanel">
+            <div class="provider-banner azure-theme">
+                <div class="provider-badge-pill">Microsoft Azure</div>
+                <h2>Conectando com o Azure For Students</h2>
+                <p>
+                    O programa <strong>Azure For Students</strong> fornece <strong>US$ 100 de crédito gratuito</strong> por 12 meses 
+                    sem necessidade de cartão de crédito. Para que o Terminal Web possa provisionar e encerrar nós automaticamente na sua conta, 
+                    criamos um <strong>Aplicativo (Service Principal)</strong> no Microsoft Entra ID.
+                </p>
+            </div>
+
+            <article class="tutorial-card highlight-card">
+                <div class="card-header">
+                    <span class="scenario-tag azure-tag">Passo a Passo Completo</span>
+                    <h3>Configuração do Service Principal na Azure</h3>
+                </div>
+
+                <div class="steps-list">
+                    <!-- PASSO 1: SUBSCRIPTION ID -->
+                    <div class="step-card">
+                        <div class="step-number">1</div>
+                        <div class="step-body">
+                            <h4>Obter o Subscription ID (ID da Assinatura)</h4>
+                            <p>Acesse o <a href="https://portal.azure.com" target="_blank" rel="noopener noreferrer">Portal do Azure</a>. Na barra de pesquisa superior, digite <code>Assinaturas</code> (ou <em>Subscriptions</em>) e clique nela.</p>
+                            <p>Localize a sua assinatura (ex: <strong>Azure for Students</strong>) e copie o valor da coluna <strong>ID da Assinatura</strong>.</p>
+                            <div class="code-box">
+                                <span class="format-sample">Formato: <code>xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</code> (36 caracteres)</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PASSO 2: REGISTRO DO APLICATIVO -->
+                    <div class="step-card">
+                        <div class="step-number">2</div>
+                        <div class="step-body">
+                            <h4>Criar o Aplicativo no Microsoft Entra ID</h4>
+                            <p>Na barra de pesquisa superior do portal, digite <code>Microsoft Entra ID</code> (antigo <em>Azure Active Directory</em>) e entre no serviço.</p>
+                            <ol class="substeps-list">
+                                <li>No menu lateral esquerdo, clique em <strong>Registros de aplicativo</strong> (<em>App registrations</em>).</li>
+                                <li>Clique no botão <strong>+ Novo registro</strong> (<em>+ New registration</em>).</li>
+                                <li>Defina um nome identificador, como: <code>TerminalWeb-Bursting</code>.</li>
+                                <li>Em <em>Tipos de conta com suporte</em>, mantenha selecionado <strong>Contas neste diretório organizacional apenas</strong>.</li>
+                                <li>Clique em <strong>Registrar</strong> no rodapé.</li>
+                            </ol>
+                            <p>Assim que o registro for concluído, você estará na tela de <strong>Visão Geral (Overview)</strong>. Copie dois valores cruciais:</p>
+                            <ul class="fields-guide-list">
+                                <li><strong>Application (client) ID:</strong> ID do aplicativo cliente (ex: <code>803809cf-4bc0-...</code>).</li>
+                                <li><strong>Directory (tenant) ID:</strong> ID do diretório / locatário (ex: <code>3b2179af-136d-...</code>).</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- PASSO 3: CLIENT SECRET -->
+                    <div class="step-card">
+                        <div class="step-number">3</div>
+                        <div class="step-body">
+                            <h4>Gerar o Client Secret (Valor do Segredo)</h4>
+                            <p>No menu lateral do seu aplicativo recém-criado, clique em <strong>Certificados e segredos</strong> (<em>Certificates & secrets</em>).</p>
+                            <ol class="substeps-list">
+                                <li>Na aba <strong>Segredos do cliente</strong>, clique no botão <strong>+ Novo segredo do cliente</strong> (<em>+ New client secret</em>).</li>
+                                <li>Digite uma descrição (ex: <code>chave-terminal-web</code>) e escolha uma validade (ex: 90 dias ou 180 dias).</li>
+                                <li>Clique em <strong>Adicionar</strong>.</li>
+                            </ol>
+                            <div class="warning-box">
+                                <span class="warning-icon">&#9888;</span>
+                                <div>
+                                    <strong>ATENÇÃO MÁXIMA:</strong>
+                                    <p>Copie imediatamente o texto da coluna <strong>Valor (Value)</strong>! Não copie o 'ID do Segredo', copie a coluna <strong>Valor</strong>. A Azure oculta permanentemente esse valor assim que você sair da página.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PASSO 4: PAPEL DE COLABORADOR -->
+                    <div class="step-card">
+                        <div class="step-number">4</div>
+                        <div class="step-body">
+                            <h4>Atribuir Permissão de Colaborador na Assinatura (MUITO IMPORTANTE!)</h4>
+                            <p>Para que o aplicativo possa criar e excluir máquinas virtuais na sua conta, ele precisa da permissão de <strong>Colaborador (Contributor)</strong> na sua assinatura:</p>
+                            <ol class="substeps-list">
+                                <li>Volte na tela de <strong>Assinaturas</strong> (<em>Subscriptions</em>) &rarr; clique na sua assinatura.</li>
+                                <li>No menu lateral esquerdo, clique em <strong>Controle de Acesso (IAM)</strong> (<em>Access control (IAM)</em>).</li>
+                                <li>Clique em <strong>+ Adicionar</strong> &rarr; <strong>Adicionar atribuição de função</strong> (<em>Add role assignment</em>).</li>
+                                <li>Na lista de funções, pesquise por <strong>Colaborador</strong> (<em>Contributor</em>), selecione-a e clique em <strong>Avançar</strong>.</li>
+                                <li>Em <em>Atribuir acesso a</em>, marque: <strong>Usuário, grupo ou entidade de serviço</strong>.</li>
+                                <li>Clique no link <strong>+ Selecionar membros</strong>.</li>
+                                <li>Na barra de pesquisa lateral, digite o nome do aplicativo criado no Passo 2 (ex: <code>TerminalWeb-Bursting</code>), selecione-o e clique em <strong>Selecionar</strong>.</li>
+                                <li>Clique no botão azul <strong>Examinar + atribuir</strong> (<em>Review + assign</em>).</li>
+                            </ol>
+                            <div class="step-tip">&#10004; <strong>Pronto!</strong> Agora o Terminal Web tem autorização para gerenciar a instância temporária na sua assinatura.</div>
+                        </div>
+                    </div>
+
+                    <!-- PASSO 5: PREENCHIMENTO -->
+                    <div class="step-card">
+                        <div class="step-number">5</div>
+                        <div class="step-body">
+                            <h4>Preencher no Terminal Web</h4>
+                            <p>Agora retorne à aba do Terminal Web e preencha o formulário:</p>
+                            <ul class="fields-guide-list">
+                                <li><strong>Subscription ID:</strong> copiado no Passo 1.</li>
+                                <li><strong>Tenant ID:</strong> Directory (tenant) ID copiado no Passo 2.</li>
+                                <li><strong>Application (Client) ID:</strong> Application (client) ID copiado no Passo 2.</li>
+                                <li><strong>Client Secret:</strong> o <em>Valor (Value)</em> do segredo copiado no Passo 3.</li>
+                                <li><strong>Região:</strong> recomendamos <code>eastus</code> (região com maior disponibilidade de cotas para estudantes) ou <code>chilecentral</code>.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </article>
+
+            <!-- FAQ AZURE -->
+            <article class="tutorial-card">
+                <div class="card-header">
+                    <h3>Dúvidas Frequentes &bull; Azure For Students</h3>
+                </div>
+                <div class="faq-accordion">
+                    <div class="faq-box">
+                        <strong>O que acontece se a região der erro de cota (QuotaExceeded)?</strong>
+                        <p>Algumas regiões da Azure possuem restrições temporárias para contas estudantis. Se isso ocorrer, mude a região no formulário do Terminal Web para <code>eastus</code> ou selecione o tamanho de VM <code>Standard_B1s</code>.</p>
+                    </div>
+                    <div class="faq-box">
+                        <strong>Minha conta será cobrada se acabar o crédito?</strong>
+                        <p>Não. A conta Azure For Students não possui cartão de crédito cadastrado; se o saldo acabar, a Microsoft simplesmente suspende as VMs sem nenhuma cobrança.</p>
+                    </div>
+                </div>
+            </article>
+        </section>
+
+        <!-- Rodapé de Suporte -->
+        <footer class="tutorial-footer">
+            <p>Precisa de mais ajuda? Consulte a documentação geral em <a href="/how-use">Como Usar</a> ou converse com o orientador do seu laboratório.</p>
+            <a href="/" class="btn-primary-action">&#8592; Voltar ao Terminal Web</a>
+        </footer>
+    </main>
+
+    <script>
+        // Gerenciamento dinâmico de abas com suporte a deep-link por hash (#aws ou #azure)
+        (function() {
+            const btnAws = document.getElementById('tab-btn-aws');
+            const btnAzure = document.getElementById('tab-btn-azure');
+            const paneAws = document.getElementById('content-aws');
+            const paneAzure = document.getElementById('content-azure');
+
+            function switchTab(provider) {
+                const isAws = provider.toLowerCase() !== 'azure';
+
+                btnAws.classList.toggle('active', isAws);
+                btnAws.setAttribute('aria-selected', isAws ? 'true' : 'false');
+                paneAws.classList.toggle('active', isAws);
+
+                btnAzure.classList.toggle('active', !isAws);
+                btnAzure.setAttribute('aria-selected', !isAws ? 'true' : 'false');
+                paneAzure.classList.toggle('active', !isAws);
+
+                // Atualiza o hash sem causar rolagem brusca
+                if (history.replaceState) {
+                    history.replaceState(null, null, '#' + (isAws ? 'aws' : 'azure'));
+                }
+            }
+
+            btnAws.addEventListener('click', () => switchTab('aws'));
+            btnAzure.addEventListener('click', () => switchTab('azure'));
+
+            // Verifica o hash da URL ao carregar
+            const hash = window.location.hash.toLowerCase();
+            if (hash.includes('azure')) {
+                switchTab('azure');
+            } else {
+                switchTab('aws');
+            }
+
+            window.addEventListener('hashchange', () => {
+                const currentHash = window.location.hash.toLowerCase();
+                if (currentHash.includes('azure')) {
+                    switchTab('azure');
+                } else if (currentHash.includes('aws')) {
+                    switchTab('aws');
+                }
+            });
+        })();
+    </script>
+</body>
+</html>

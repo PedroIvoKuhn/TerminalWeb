@@ -35,6 +35,14 @@ app.use('/xterm', express.static(path.join(__dirname, 'node_modules/xterm')));
 app.use('/xterm-addon-fit', express.static(path.join(__dirname, 'node_modules/xterm-addon-fit')));
 app.use('/api', minioController);
 
+// Rotas do Tutorial de Credenciais de Nuvem
+app.get('/tutorial-nuvem', (req, res) => {
+    res.sendFile(path.join(__dirname, 'views', 'cloudTutorial.html'));
+});
+app.get('/cloud-tutorial', (req, res) => {
+    res.redirect('/tutorial-nuvem');
+});
+
 async function start() {
     try {
         await ltiController.setup(app);

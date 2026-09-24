@@ -33,6 +33,14 @@ async function setup(app) {
             const documentationPath = path.join(__dirname, '../views', 'howUse.html');
             res.sendFile(documentationPath);
         });
+
+        app.get('/tutorial-nuvem', (req, res) => {
+            const tutorialPath = path.join(__dirname, '../views', 'cloudTutorial.html');
+            res.sendFile(tutorialPath);
+        });
+        app.get('/cloud-tutorial', (req, res) => {
+            res.redirect('/tutorial-nuvem');
+        });
         return;
     }
 
@@ -117,6 +125,15 @@ async function setup(app) {
     lti.app.get('/how-use', (req, res) => {
         const documentationPath = path.join(__dirname, '../views', 'howUse.html');
         res.sendFile(documentationPath);
+    });
+
+    lti.app.get('/tutorial-nuvem', (req, res) => {
+        const tutorialPath = path.join(__dirname, '../views', 'cloudTutorial.html');
+        res.sendFile(tutorialPath);
+    });
+
+    lti.app.get('/cloud-tutorial', (req, res) => {
+        res.redirect('/tutorial-nuvem');
     });
 }
 

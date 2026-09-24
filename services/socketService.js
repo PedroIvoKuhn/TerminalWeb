@@ -244,7 +244,8 @@ async function handleSessionBurst(socket, data = {}) {
         return;
     }
 
-    const provider = (process.env.CLOUD_PROVIDER || 'AWS').toUpperCase();
+    const provider = (data && data.provider ? String(data.provider).trim().toUpperCase() : (process.env.CLOUD_PROVIDER || 'AWS')).toUpperCase();
+    const credentials = (data && data.credentials && typeof data.credentials === 'object') ? data.credentials : {};
     const imageToPreload = (data && data.image) || process.env.DEFAULT_MPI_IMAGE;
     socket.data.isBursting = true;
     socket.data.burstCancelled = false;
@@ -257,6 +258,7 @@ async function handleSessionBurst(socket, data = {}) {
 
         const result = await cloudBurstingService.addNode({
             provider,
+            credentials,
             imageToPreload,
             tags: {
                 socketId: socket.id,
@@ -270,7 +272,8 @@ async function handleSessionBurst(socket, data = {}) {
                     nodeId: createdNodeId,
                     nodeName: nodeName,
                     privateDnsOrHost: privateDns,
-                    provider
+                    provider,
+                    credentials
                 };
                 sessionService.registerPendingBurst(socket.id, pendingBurstInfo);
                 console.log(`[BURST] Nó ${createdNodeId} (${nodeName}) criado e registrado como pendente para o socket ${socket.id}.`);
@@ -309,6 +312,7 @@ async function handleSessionBurst(socket, data = {}) {
         socket.data.hasBurstNode = true;
         socket.emit('burst:complete', {
             nodeId: result.nodeId,
+            nodeName: result.nodeName || result.nodeId,
             provider: result.provider
         });
         console.log(`[Socket ${socket.id}] Cloud Bursting concluído com sucesso. NodeId: ${result.nodeId}`);

@@ -8,19 +8,30 @@ const {
 } = require("@aws-sdk/client-ec2");
 const { STSClient, GetCallerIdentityCommand: STSGetCallerIdentityCommand } = require("@aws-sdk/client-sts");
 
+function resolveAwsCredentials(credentials = {}) {
+    const creds = {};
+    if (credentials.accessKeyId && String(credentials.accessKeyId).trim()) {
+        creds.accessKeyId = String(credentials.accessKeyId).trim();
+    }
+    if (credentials.secretAccessKey && String(credentials.secretAccessKey).trim()) {
+        creds.secretAccessKey = String(credentials.secretAccessKey).trim();
+    }
+    if (credentials.sessionToken && String(credentials.sessionToken).trim()) {
+        creds.sessionToken = String(credentials.sessionToken).trim();
+    }
+    return creds;
+}
+
 /**
  * Cria o cliente EC2 a partir das credenciais passadas
  */
 function createEc2Client(credentials = {}) {
-    const region = credentials.region || process.env.AWS_REGION || 'sa-east-1';
+    const region = (credentials.region && String(credentials.region).trim()) || process.env.AWS_REGION || 'sa-east-1';
     const config = { region };
+    const awsCreds = resolveAwsCredentials(credentials);
 
-    if (credentials.accessKeyId && credentials.secretAccessKey) {
-        config.credentials = {
-            accessKeyId: credentials.accessKeyId,
-            secretAccessKey: credentials.secretAccessKey,
-            sessionToken: credentials.sessionToken
-        };
+    if (awsCreds.accessKeyId && awsCreds.secretAccessKey) {
+        config.credentials = awsCreds;
     }
 
     return new EC2Client(config);
@@ -30,15 +41,12 @@ function createEc2Client(credentials = {}) {
  * Testa e valida se as credenciais da AWS são válidas
  */
 async function validateCredentials(credentials = {}) {
-    const region = credentials.region || process.env.AWS_REGION || 'sa-east-1';
+    const region = (credentials.region && String(credentials.region).trim()) || process.env.AWS_REGION || 'sa-east-1';
     const stsConfig = { region };
+    const awsCreds = resolveAwsCredentials(credentials);
 
-    if (credentials.accessKeyId && credentials.secretAccessKey) {
-        stsConfig.credentials = {
-            accessKeyId: credentials.accessKeyId,
-            secretAccessKey: credentials.secretAccessKey,
-            sessionToken: credentials.sessionToken
-        };
+    if (awsCreds.accessKeyId && awsCreds.secretAccessKey) {
+        stsConfig.credentials = awsCreds;
     }
 
     try {
