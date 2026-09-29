@@ -1,70 +1,277 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Como Usar</title>
-    <link rel="stylesheet" href="/css/global.css"/>
-    <link rel="stylesheet" href="/css/howUse.css"/>
+    <title>Como Usar - Terminal Web</title>
+    <link rel="stylesheet" href="/css/global.css" />
+    <link rel="stylesheet" href="/css/howUse.css" />
     <link rel="icon" type="image/png" href="/favicon.png">
 </head>
+
 <body>
-    <nav> 
+    <nav>
         <ul class="nav-links">
             <li><a href="/">Home</a></li>
-            <li><a href="/how-use">Como usar</a></li>
+            <li><a href="/how-use" class="active">Como usar</a></li>
+            <li><a href="/tutorial-nuvem">Tutorial de Credenciais</a></li>
         </ul>
     </nav>
 
-    <div class="container">
-        <h1>Guia de Uso</h1>
-        <p>Bem-vindo ao Terminal Web! Esta ferramenta provisiona um cluster privado e temporário exclusivamente para você, permitindo a execução de aplicações paralelas diretamente do seu navegador.</p>
+    <main class="how-use-wrapper">
+        <!-- Hero Header -->
+        <header class="how-use-hero">
+            <div class="hero-badge">Documentação Oficial &bull; Guia Rápido</div>
+            <h1>Como Usar o Terminal Web</h1>
+            <p class="hero-lead">
+                O <strong>Terminal Web</strong> provisiona um cluster privado e temporário exclusivamente para você,
+                permitindo compilar, executar e testar aplicações paralelas e distribuídas diretamente pelo navegador.
+            </p>
 
-        <h2>🚀 Como Começar</h2>
-        <ol>
-            <li><strong>Escolha o número de nós:</strong> Na tela inicial, digite quantas máquinas você deseja para o seu cluster (ex: 3 máquinas irá gerar <code>1 master</code> e <code>2 workers</code>).</li>
-            <li><strong>Aguarde o provisionamento:</strong> O sistema criará os contêineres e configurará automaticamente a rede e as chaves SSH seguras entre eles.</li>
-            <li><strong>Acesse o Terminal:</strong> Assim que os nós estiverem prontos, você será conectado ao nó <code>master</code>. A partir dele, você comanda todo o cluster.</li>
-        </ol>
+            <div class="info-callout">
+                <div>
+                    <strong>Cluster Privado e Isolado:</strong>
+                    <span>Cada sessão inicializa 1 nó master e workers dedicados, configurados com autenticação SSH
+                        automática sem senha e ambiente pronto para uso.</span>
+                </div>
+            </div>
+        </header>
 
-        <h2>🔌 Comunicação entre Máquinas (SSH)</h2>
-        <p>Por questões de segurança, geramos um par de chaves SSH exclusivo para cada sessão. Você não precisa de senhas para navegar entre as máquinas do seu cluster.</p>
-        <p>Para acessar outro nó a partir do master, basta usar o comando <code>ssh "nome-do-nó"</code>, que os apelidos já foram configurados, por exemplo:</p>
-        <ul>
-            <li><code>ssh worker-1</code></li>
-            <li><code>ssh worker-2</code></li>
-        </ul>
+        <!-- BLOCO 1: Como Começar -->
+        <article class="guide-card highlight-card">
+            <div class="card-header">
+                <span class="scenario-tag tag-start">Passo a Passo</span>
+                <h3>Como Começar seu Cluster</h3>
+            </div>
+            <p class="card-desc">
+                Ao acessar a tela inicial, você inicia seu ambiente em poucos cliques:
+            </p>
 
-        <h2>⏳ Tempo de Sessão e Limpeza Automática</h2>
-        <p>Para garantir que os recursos do servidor estejam disponíveis para todos os alunos, sua sessão possui um <strong>tempo limite de 2 horas</strong>.</p>
-        <p>Caso cair sua internet, ou tiver que sair por um tempo, fique tranquilo que a sua sessão é restaurada enquanto o tempo não acabar.</p>
-        <ul>
-            <li>Um cronômetro ficará visível no topo da tela.</li>
-            <li>Faltando 20 minutos para o fim, a barra ficará vermelha e um aviso aparecerá.</li>
-            <li>Você poderá clicar em <strong>"Sim, preciso de mais tempo"</strong> para estender a sessão por mais 1 hora.</li>
-            <li>Caso precise rodar uma aplicação por mais tempo, terá um botão para extender a sessão por +24 horas, e só poderá extender novamente depois que passar no mínimo 12 horas. Pedimos que utilize esse recurso com <strong>consciência</strong>.</li>
-        </ul>
+            <div class="steps-list">
+                <div class="step-card">
+                    <div class="step-number">1</div>
+                    <div class="step-body">
+                        <h4>Defina o Número de Nós (Máquinas)</h4>
+                        <p>No formulário inicial, digite quantas máquinas você deseja para seu laboratório (ex: 3
+                            máquinas criará <code>1 master</code> e <code>2 workers</code>).</p>
+                    </div>
+                </div>
 
-        <hr style="border: 1px solid #444; margin: 40px 0;">
+                <div class="step-card">
+                    <div class="step-number">2</div>
+                    <div class="step-body">
+                        <h4>Selecione o Ponto de Partida</h4>
+                        <p>Você pode optar por <em>-- Começar do Zero (Vazio) --</em> ou selecionar um backup
+                            previamente salvo na sua conta para retomar exatamente de onde parou.</p>
+                    </div>
+                </div>
 
-        <h2>❓ Perguntas Frequentes (FAQ)</h2>
+                <div class="step-card">
+                    <div class="step-number">3</div>
+                    <div class="step-body">
+                        <h4>Aguarde o Provisionamento Automático</h4>
+                        <p>O sistema criará os contêineres e configurará a rede virtual interna, as chaves SSH de
+                            comunicação e os aliases de rede.</p>
+                        <div class="step-tip">Esse processo leva poucos segundos e garante que seu cluster
+                            esteja 100% isolado de outros usuários.</div>
+                    </div>
+                </div>
 
-        <div class="faq-item">
-            <h3>Meus arquivos ficam salvos após eu fechar o navegador?</h3>
-            <p><strong>Sim.</strong> Mas para isso é necessário salvar pelo menos uma vez o ambiente, que assim que a sessão for encerrada (seja pelo tempo limite ou ao fechar a conexão), apenas os dados do master serão salvos e todos os contêineres e discos virtuais são destruídos permanentemente.</p>
-        </div>
+                <div class="step-card">
+                    <div class="step-number">4</div>
+                    <div class="step-body">
+                        <h4>Acesse o Terminal do Master</h4>
+                        <p>Assim que os nós estiverem prontos, o terminal interativo é conectado ao nó
+                            <code>master</code>. A partir dele, você tem controle total para comandar todo o cluster.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </article>
 
-        <div class="faq-item">
-            <h3>Posso instalar novos pacotes (apt-get)?</h3>
-            <p><strong>Sim!</strong> Você possui permissões de administrador (sudo) sem necessidade de senha. Você pode rodar <code>sudo apt-get install [pacote]</code>, mas lembre-se que essas instalações serão perdidas ao fim da sessão.</p>
-        </div>
+        <!-- BLOCO 2: Comunicação SSH -->
+        <article class="guide-card">
+            <div class="card-header">
+                <span class="scenario-tag tag-ssh">Rede & Comunicação</span>
+                <h3>Comunicação entre Máquinas (SSH sem Senha)</h3>
+            </div>
+            <p class="card-desc">
+                Por motivos de segurança e agilidade no trabalho acadêmico, é gerado um par de chaves SSH criptográficas
+                exclusivo para cada sessão.
+                Você não precisa digitar senhas para navegar ou enviar tarefas entre os nós.
+            </p>
 
-        <div class="faq-item">
-            <h3>Como compilo e rodo códigos MPI?</h3>
-            <p>O ambiente já vem configurado com OpenMPI. Use <code>mpicc programa.c -o programa</code> para compilar e <code>mpirun -np [processos] --host master,worker-1 ./programa</code> para rodar distribuído.</p>
-        </div>
+            <p>Para acessar outro nó diretamente a partir do master, utilize o comando <code>ssh "nome-do-nó"</code>:
+            </p>
 
-    </div>
-    <script src="howUse.js"></script>
+            <div class="code-container">
+                <div><span class="code-comment"># Acessa o primeiro worker:</span></div>
+                <div>ssh worker-1</div>
+                <br>
+                <div><span class="code-comment"># Acessa o segundo worker:</span></div>
+                <div>ssh worker-2</div>
+                <br>
+                <div><span class="code-comment"># Retorna ao nó master:</span></div>
+                <div>exit</div>
+            </div>
+
+            <div class="step-tip-ssh">Você pode também clicar nos botões da lista de máquinas da sua sessão.</div>
+        </article>
+
+        <!-- BLOCO 3: Cloud Bursting -->
+        <article class="guide-card cloud-card">
+            <div class="card-header">
+                <span class="scenario-tag tag-cloud">Expansão de Recursos</span>
+                <h3>Expansão na Nuvem (Cloud Bursting)</h3>
+            </div>
+            <p class="card-desc">
+                Precisa de poder de processamento adicional além dos nós locais? O Terminal Web permite conectar
+                máquinas virtuais externas
+                na <strong>Amazon AWS</strong> ou no <strong>Azure For Students</strong>, integrando-as como workers do
+                seu cluster.
+            </p>
+
+            <div class="card-action-banner">
+                <div class="action-banner-text">
+                    <strong>Primeira vez configurando Cloud Bursting?</strong>
+                    <div>Consulte o tutorial ilustrado de como gerar suas credenciais no Console AWS ou Azure:</div>
+                </div>
+                <a href="/tutorial-nuvem" class="btn-card-action">
+                    <span>Tutorial de Credenciais</span>
+                    <span>&rarr;</span>
+                </a>
+            </div>
+        </article>
+
+        <!-- BLOCO 4: Tempo de Sessão -->
+        <article class="guide-card timer-card">
+            <div class="card-header">
+                <span class="scenario-tag tag-timer">Ciclo de Vida</span>
+                <h3>Tempo de Sessão e Tolerância a Quedas</h3>
+            </div>
+            <p class="card-desc">
+                Para garantir a sustentabilidade e disponibilidade dos recursos do servidor para todos os alunos, cada
+                sessão segue regras claras de tempo:
+            </p>
+
+            <div class="steps-list">
+                <div class="step-card">
+                    <div class="step-number-life">&#9201;</div>
+                    <div class="step-body">
+                        <h4>Tempo Padrão de 2 Horas</h4>
+                        <p>O cronômetro regressivo permanece visível no topo da barra de navegação durante todo o uso.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="step-card">
+                    <div class="step-number-life">&#9888;</div>
+                    <div class="step-body">
+                        <h4>Alerta aos 20 Minutos</h4>
+                        <p>Faltando 20 minutos para o término, a barra fica vermelha e uma janela surge permitindo
+                            estender a sessão em +1 hora com um único clique.</p>
+                    </div>
+                </div>
+
+                <div class="step-card">
+                    <div class="step-number-life">+24</div>
+                    <div class="step-body">
+                        <h4>Extensão de +24 Horas</h4>
+                        <p>Se você estiver executando benchmarks demorados ou treinamentos computacionais, utilize o
+                            botão <strong>+24 Horas</strong> no topo da tela (requer intervalo mínimo de 12 horas entre
+                            extensões).</p>
+                    </div>
+                </div>
+
+                <div class="step-card">
+                    <div class="step-number-life">&#128260;</div>
+                    <div class="step-body">
+                        <h4>Tolerância a Quedas de Conexão</h4>
+                        <p>Se sua internet oscilar ou você fechar a aba acidentalmente, sua sessão permanece ativa no
+                            servidor e será restaurada automaticamente assim que você reabrir o Terminal Web, desde que
+                            o tempo limite não tenha expirado.</p>
+                    </div>
+                </div>
+            </div>
+        </article>
+
+        <!-- BLOCO 5: Salvamento e Arquivos -->
+        <article class="guide-card backup-card">
+            <div class="card-header">
+                <span class="scenario-tag tag-backup">Persistência</span>
+                <h3>Salvando seu Progresso e Arquivos</h3>
+            </div>
+            <p class="card-desc">
+                Ao encerrar a sessão, os contêineres e discos temporários são excluídos. Portanto, sempre salve seu
+                progresso antes de sair:
+            </p>
+
+            <div class="steps-list">
+                <div class="step-card">
+                    <div class="step-number-persistencia">💾</div>
+                    <div class="step-body">
+                        <h4>Salvar Atual vs. Salvar Novo</h4>
+                        <p>Use o botão <strong>Salvar</strong> para atualizar seu arquivo em uso, ou digite um novo nome
+                            no campo de texto para gerar uma versão com checkpoint específico.</p>
+                    </div>
+                </div>
+
+                <div class="step-card">
+                    <div class="step-number-persistencia">📂</div>
+                    <div class="step-body">
+                        <h4>Download em "Meus Arquivos"</h4>
+                        <p>Na tela inicial, na seção <em>Meus Arquivos</em>, você pode fazer o download dos
+                            arquivos salvos diretamente para seu computador.</p>
+                    </div>
+                </div>
+            </div>
+        </article>
+
+        <!-- BLOCO 6: FAQ -->
+        <article class="guide-card">
+            <div class="card-header">
+                <span class="scenario-tag tag-faq">Perguntas Frequentes</span>
+                <h3>Dúvidas Comuns (FAQ)</h3>
+            </div>
+
+            <div class="faq-grid">
+                <div class="faq-box">
+                    <strong>Meus arquivos ficam salvos após eu fechar o navegador?</strong>
+                    <p>Sim, desde que você clique em <em>Salvar</em> pelo menos uma vez. Ao término da
+                        sessão, os dados salvos do nó master são preservados na sua conta.</p>
+                </div>
+
+                <div class="faq-box">
+                    <strong>Posso instalar novos pacotes (apt-get)?</strong>
+                    <p>Sim! Você possui permissão de administrador (<code>sudo</code>) sem necessidade de senha. Você
+                        pode rodar <code>sudo apt-get install [pacote]</code> a qualquer momento durante a aula.</p>
+                </div>
+
+                <div class="faq-box">
+                    <strong>Como compilo e rodo códigos OpenMPI distribuídos?</strong>
+                    <p>O ambiente padrão já inclui GCC e OpenMPI configurados. Compile seu código com
+                        <code>mpicc programa.c -o programa</code> e execute no cluster com
+                        <code>mpirun -np 4 --host master,worker-1 ./programa</code>.
+                    </p>
+                </div>
+
+                <div class="faq-box">
+                    <strong>O que acontece se eu clicar em "Encerrar Sessão"?</strong>
+                    <p>Todos os contêineres e nós na nuvem vinculados à sua sessão são desligados e destruídos
+                        imediatamente para liberar recursos do laboratório.</p>
+                </div>
+            </div>
+        </article>
+
+        <!-- Rodapé de Suporte -->
+        <footer class="how-use-footer">
+            <p>Dúvidas sobre credenciais de nuvem? Acesse o <a href="/tutorial-nuvem">Tutorial de Credenciais</a>.</p>
+            <a href="/" class="btn-primary-action">&#8592; Voltar ao Terminal Web</a>
+        </footer>
+    </main>
+
+    <script src="/howUse.js"></script>
 </body>
+
 </html>
