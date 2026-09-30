@@ -23,10 +23,24 @@ body {
 }
 
 .nav-links a.active {
-    color: var(--azul);
-    border-bottom: 2px solid var(--azul);
+    color: #38bdf8;
+    border-bottom: 2px solid #38bdf8;
     padding-bottom: 4px;
 }
+
+/* Links no conteúdo: azul claro e nítido */
+.how-use-wrapper a:not(.btn-primary-action):not(.btn-cloud-tutorial) {
+    color: #38bdf8;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    font-weight: 500;
+    transition: color 0.2s ease;
+}
+
+.how-use-wrapper a:not(.btn-primary-action):not(.btn-cloud-tutorial):hover {
+    color: #7dd3fc;
+}
+
 
 .btn-back-app {
     display: inline-flex;
@@ -242,6 +256,8 @@ body {
 
 .step-body {
     flex: 1;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .step-body h4 {
@@ -362,7 +378,7 @@ code {
     border-color: #3f3f46;
 }
 
-.faq-box strong {
+.faq-box > strong:first-child {
     display: block;
     font-size: 1rem;
     color: #f39c12;
@@ -374,6 +390,13 @@ code {
     font-size: 0.92rem;
     color: #cbd5e1;
     line-height: 1.55;
+}
+
+.faq-box p strong,
+.faq-box li strong {
+    display: inline;
+    color: #f1f5f9;
+    font-weight: 700;
 }
 
 /* Rodapé */

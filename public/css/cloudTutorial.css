@@ -23,29 +23,42 @@ body {
 }
 
 .nav-links a.active {
-    color: var(--azul);
-    border-bottom: 2px solid var(--azul);
+    color: #38bdf8;
+    border-bottom: 2px solid #38bdf8;
     padding-bottom: 4px;
 }
+
+/* Links no conteúdo do tutorial: azul claro e nítido */
+.tutorial-wrapper a:not(.btn-primary-action):not(.tab-btn) {
+    color: #38bdf8;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    font-weight: 500;
+    transition: color 0.2s ease;
+}
+
+.tutorial-wrapper a:not(.btn-primary-action):not(.tab-btn):hover {
+    color: #7dd3fc;
+}
+
 
 .btn-back-app {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--azul);
     color: #fff;
     text-decoration: none;
-    font-weight: 600;
+    font-weight: bold;
     font-size: 0.88rem;
-    padding: 7px 14px;
-    border-radius: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    transition: all 0.2s ease;
+    padding: 8px 14px;
+    border-radius: 4px;
+    border: none;
+    transition: background 0.3s;
 }
 
 .btn-back-app:hover {
-    background: rgba(255, 255, 255, 0.2);
-    transform: translateY(-1px);
+    background: var(--azul-contraste);
 }
 
 /* Hero Section */
@@ -243,6 +256,9 @@ body {
     padding: 28px;
     margin-bottom: 24px;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    box-sizing: border-box;
+    max-width: 100%;
+    overflow: hidden;
 }
 
 .tutorial-card.highlight-card {
@@ -286,6 +302,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 18px;
+    width: 100%;
 }
 
 .step-card {
@@ -295,6 +312,9 @@ body {
     border: 1px solid #383838;
     border-radius: 8px;
     padding: 18px;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 .step-number {
@@ -318,6 +338,8 @@ body {
 
 .step-body {
     flex: 1;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .step-body h4 {
@@ -366,24 +388,75 @@ body {
 
 /* Code & Warning Boxes */
 .code-box {
+    position: relative;
     background: #141414;
     border: 1px solid #333;
     border-radius: 6px;
-    padding: 12px 14px;
+    padding: 14px 16px;
     margin: 12px 0;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow-x: auto;
 }
 
 .code-box pre {
     margin: 0;
     overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.86rem;
+    line-height: 1.5;
 }
 
 .code-box code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 0.82rem;
+    font-family: inherit;
+    font-size: inherit;
     color: #38bdf8;
     background: none;
     padding: 0;
+    white-space: inherit;
+    word-break: inherit;
+}
+
+.code-box .cmd-highlight {
+    color: #50fa7b;
+}
+
+.code-box .code-comment {
+    color: #64748b;
+    user-select: none;
+}
+
+.btn-copy-code {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #cbd5e1;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    z-index: 2;
+}
+
+.btn-copy-code:hover {
+    background: #334155;
+    border-color: #38bdf8;
+    color: #38bdf8;
+}
+
+.btn-copy-code.copied {
+    background: #064e3b;
+    border-color: #10b981;
+    color: #34d399;
 }
 
 .warning-box {
@@ -403,15 +476,24 @@ body {
     line-height: 1;
 }
 
-.warning-box strong {
+.warning-box > strong,
+.warning-box > div > strong:first-child {
     color: #f87171;
     display: block;
     margin-bottom: 4px;
+    font-size: 0.92rem;
 }
 
 .warning-box p {
     margin: 0;
     color: #fecaca;
+    line-height: 1.5;
+}
+
+.warning-box p strong {
+    display: inline;
+    color: #ffffff;
+    font-weight: 700;
 }
 
 /* FAQ Accordion */
@@ -428,7 +510,7 @@ body {
     padding: 14px 18px;
 }
 
-.faq-box strong {
+.faq-box > strong:first-child {
     color: #f1f5f9;
     display: block;
     margin-bottom: 6px;
@@ -439,6 +521,14 @@ body {
     margin: 0;
     color: #94a3b8;
     font-size: 0.88rem;
+    line-height: 1.55;
+}
+
+.faq-box p strong,
+.faq-box li strong {
+    display: inline;
+    color: #f1f5f9;
+    font-weight: 700;
 }
 
 /* Tutorial Footer */
@@ -463,20 +553,19 @@ body {
     align-items: center;
     gap: 8px;
     background: var(--azul);
-    color: #fff;
-    font-weight: 700;
+    color: #fff !important;
+    font-weight: bold;
     text-decoration: none;
-    padding: 12px 24px;
-    border-radius: 6px;
+    padding: 10px 20px;
+    border-radius: 4px;
+    border: none;
     font-size: 1rem;
-    box-shadow: 0 4px 12px rgba(0, 145, 255, 0.4);
-    transition: all 0.25s ease;
+    cursor: pointer;
+    transition: background 0.3s;
 }
 
 .btn-primary-action:hover {
     background: var(--azul-contraste);
-    transform: translateY(-2px);
-    box-shadow: 0 6px 18px rgba(0, 145, 255, 0.6);
 }
 
 /* Responsividade */

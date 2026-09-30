@@ -61,5 +61,20 @@ nav {
 }
 
 .nav-links a:hover {
-    color: #3498db;
+    color: #38bdf8;
 }
+
+/* Links globais mais claros e legíveis */
+a {
+    color: #38bdf8;
+    transition: color 0.2s ease;
+}
+
+a:hover {
+    color: #7dd3fc;
+}
+
+p strong, li strong, span strong, a strong, td strong, th strong {
+    display: inline;
+}
+
