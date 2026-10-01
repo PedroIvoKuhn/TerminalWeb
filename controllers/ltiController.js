@@ -39,7 +39,8 @@ async function setup(app) {
             res.sendFile(tutorialPath);
         });
         app.get('/cloud-tutorial', (req, res) => {
-            res.redirect('/tutorial-nuvem');
+            const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+            res.redirect('/tutorial-nuvem' + query);
         });
         return;
     }
@@ -133,7 +134,8 @@ async function setup(app) {
     });
 
     lti.app.get('/cloud-tutorial', (req, res) => {
-        res.redirect('/tutorial-nuvem');
+        const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+        res.redirect('/tutorial-nuvem' + query);
     });
 }
 

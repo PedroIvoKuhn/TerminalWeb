@@ -775,7 +775,7 @@ input,
     flex: 1;
 }
 
-.tutorial-banner-body > strong:first-child {
+.tutorial-banner-body>strong:first-child {
     display: block;
     color: #60a5fa;
     font-size: 0.92rem;
@@ -1249,5 +1249,100 @@ input,
     .btn-tutorial-action {
         width: 100%;
         justify-content: center;
+    }
+}
+
+/* Card/Toast de Alerta de Congestionamento do Cluster */
+.cluster-congestion-card {
+    background: linear-gradient(135deg, #c53030 0%, #9b1c1c 100%);
+    border: 2px solid var(--vermelho);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin: 20px auto;
+    max-width: 650px;
+    text-align: left;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 16px rgba(255, 56, 60, 0.35);
+    animation: fadeInSlideDown 0.4s ease-out;
+    box-sizing: border-box;
+}
+
+.congestion-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.congestion-title {
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: #ffffff;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    letter-spacing: 0.2px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+#congestion-load-val {
+    color: #fef08a;
+    font-weight: 800;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+.btn-congestion-close {
+    background: none;
+    border: none;
+    color: #ffffff;
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 2px 8px;
+    border-radius: 4px;
+    opacity: 0.85;
+    transition: opacity 0.2s, background 0.2s;
+}
+
+.btn-congestion-close:hover {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.congestion-desc {
+    margin: 0 0 14px 0;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    color: #ffffff;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.congestion-desc strong {
+    color: #fef08a;
+    font-weight: 700;
+    text-decoration: underline;
+}
+
+.congestion-actions {
+    display: flex;
+    justify-content: center;
+    margin-top: 14px;
+}
+
+#btn-congestion-burst {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+@keyframes fadeInSlideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
     }
 }

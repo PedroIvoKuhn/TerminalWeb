@@ -14,16 +14,32 @@ const selectBackup = document.getElementById('select-backup');
 
 let cacheArquivos = {}; 
 
-document.addEventListener('DOMContentLoaded', () => {
+function getLtik() {
     const urlParams = new URLSearchParams(window.location.search);
-    const ltik = urlParams.get('ltik') || window.LTI_TOKEN;
+    return urlParams.get('ltik') || window.LTI_TOKEN || '';
+}
+
+function buildInternalUrl(pathname, hash = '') {
+    const ltik = getLtik();
+    const url = new URL(pathname, window.location.origin);
+    if (ltik) {
+        url.searchParams.set('ltik', ltik);
+    }
+    if (hash) {
+        url.hash = hash.startsWith('#') ? hash : `#${hash}`;
+    }
+    return url.pathname + url.search + url.hash;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const ltik = getLtik();
 
     if (ltik) {
         const links = document.querySelectorAll('a[href^="/"]');
         links.forEach(link => {
             const url = new URL(link.href, window.location.origin);
             url.searchParams.set('ltik', ltik);
-            link.href = url.pathname + url.search;
+            link.href = url.pathname + url.search + url.hash;
         });
     }
 });
@@ -906,7 +922,7 @@ function selectProvider(provider) {
         if (burstFieldsAws) burstFieldsAws.style.display = 'block';
         if (burstFieldsAzure) burstFieldsAzure.style.display = 'none';
         if (btnOpenCloudTutorial) {
-            btnOpenCloudTutorial.href = '/tutorial-nuvem#aws';
+            btnOpenCloudTutorial.href = buildInternalUrl('/tutorial-nuvem', '#aws');
             btnOpenCloudTutorial.title = 'Abrir tutorial da AWS em nova janela';
         }
         loadSavedCredentials('AWS');
@@ -918,7 +934,7 @@ function selectProvider(provider) {
         if (burstFieldsAws) burstFieldsAws.style.display = 'none';
         if (burstFieldsAzure) burstFieldsAzure.style.display = 'block';
         if (btnOpenCloudTutorial) {
-            btnOpenCloudTutorial.href = '/tutorial-nuvem#azure';
+            btnOpenCloudTutorial.href = buildInternalUrl('/tutorial-nuvem', '#azure');
             btnOpenCloudTutorial.title = 'Abrir tutorial do Azure em nova janela';
         }
         loadSavedCredentials('AZURE');
@@ -1154,4 +1170,53 @@ socket.on('burst:error', ({ message }) => {
         btnBurstRetry.style.display = 'inline-block';
     }
     if (btnBurstFinish) btnBurstFinish.style.display = 'none';
+});
+
+// --- MONITORAMENTO DE CARGA DO CLUSTER & ALERTA PRÉ-SESSÃO ---
+const clusterCongestionToast = document.getElementById('cluster-congestion-toast');
+const congestionLoadVal = document.getElementById('congestion-load-val');
+const btnCongestionBurst = document.getElementById('btn-congestion-burst');
+const btnCloseCongestionToast = document.getElementById('btn-close-congestion-toast');
+
+let isCongestionAlertDismissed = false;
+
+if (btnCongestionBurst) {
+    btnCongestionBurst.addEventListener('click', () => {
+        openBurstModal();
+    });
+}
+
+if (btnCloseCongestionToast) {
+    btnCloseCongestionToast.addEventListener('click', () => {
+        isCongestionAlertDismissed = true;
+        if (clusterCongestionToast) clusterCongestionToast.style.display = 'none';
+    });
+}
+
+socket.on('cluster:metrics', (metrics = {}) => {
+    // Só exibe o aviso se o terminal ainda não foi iniciado (usuário na tela de setup)
+    const setupContainer = document.getElementById('setup-container');
+    const isSetupVisible = setupContainer && setupContainer.style.display !== 'none';
+    const isTerminalActive = Boolean(localStorage.getItem('jobId'));
+
+    if (isSetupVisible && !isTerminalActive && !isBurstConnected && !isCongestionAlertDismissed) {
+        if (metrics.isCongested) {
+            const displayLoad = (metrics && metrics.avgCpu != null) ? metrics.avgCpu : 0;
+            if (congestionLoadVal) {
+                congestionLoadVal.textContent = `${displayLoad}%`;
+            }
+            if (clusterCongestionToast) {
+                clusterCongestionToast.style.display = 'block';
+            }
+        } else {
+            if (clusterCongestionToast) {
+                clusterCongestionToast.style.display = 'none';
+            }
+        }
+    } else {
+        // Se a tela de setup não estiver ativa ou o nó já foi conectado, oculta
+        if (clusterCongestionToast) {
+            clusterCongestionToast.style.display = 'none';
+        }
+    }
 });

@@ -4,8 +4,16 @@ const minioService = require('./minioService');
 const sessionService = require('./sessionService');
 const cloudBurstingService = require('./cloudBurstingService');
 const cryptoService = require('./cryptoService');
+const clusterMonitorService = require('./clusterMonitorService');
 
 module.exports = (io) => {
+    // Transmissão periódica das métricas para os usuários conectados
+    setInterval(async () => {
+        try {
+            const metrics = await clusterMonitorService.getClusterMetrics();
+            io.emit('cluster:metrics', metrics);
+        } catch (e) {}
+    }, 25000);
     io.on('connection', (socket) => {
         const session = socket.request.session;
         let userId = session ? session.userId : null;
@@ -17,6 +25,13 @@ module.exports = (io) => {
         console.log(`[Socket] Conectado. UserID da Sessão: ${userId}`);
         socket.data.userId = userId;
         socket.data.activeBackupName = null;
+
+        // Envia métricas do cluster imediatamente na conexão para aviso de pré-sessão
+        clusterMonitorService.getClusterMetrics().then(metrics => {
+            if (!socket.disconnected) {
+                socket.emit('cluster:metrics', metrics);
+            }
+        }).catch(() => {});
 
         socket.on('start-session', async (data) => {
             let { numMachines, image, backupName } = data;

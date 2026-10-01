@@ -61,6 +61,24 @@
             </button>
         </div>
 
+        <!-- Alerta Dinâmico de Congestionamento do Cluster Local -->
+        <div id="cluster-congestion-toast" class="cluster-congestion-card" style="display: none;">
+            <div class="congestion-header">
+                <span class="congestion-title">⚠️ Cluster com Alta Demanda (<span id="congestion-load-val"></span> de uso)</span>
+                <button type="button" id="btn-close-congestion-toast" class="btn-congestion-close"
+                    title="Dispensar aviso">✕</button>
+            </div>
+            <p class="congestion-desc">
+                Os nós locais estão sobrecarregados no momento. Conecte uma máquina na nuvem <strong>antes</strong> de
+                iniciar o terminal para que todos os seus pods rodem dedicados na sua nuvem, sem lentidão ou filas.
+            </p>
+            <div class="congestion-actions">
+                <button type="button" id="btn-congestion-burst" class="btn-primary">
+                    ☁️ Conectar Nuvem Agora (Recomendado)
+                </button>
+            </div>
+        </div>
+
         <div class="files">
             <h3 class="my-files">📂 Meus Arquivos</h3>
             <ul id="download-list">

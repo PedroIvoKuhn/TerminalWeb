@@ -9,7 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
         links.forEach(link => {
             const url = new URL(link.href, window.location.origin);
             url.searchParams.set('ltik', ltik);
-            link.href = url.pathname + url.search;
+            link.href = url.pathname + url.search + url.hash;
         });
     }
 });

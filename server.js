@@ -41,7 +41,8 @@ app.get('/tutorial-nuvem', (req, res) => {
     res.sendFile(path.join(__dirname, 'views', 'cloudTutorial.html'));
 });
 app.get('/cloud-tutorial', (req, res) => {
-    res.redirect('/tutorial-nuvem');
+    const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    res.redirect('/tutorial-nuvem' + query);
 });
 
 async function start() {
