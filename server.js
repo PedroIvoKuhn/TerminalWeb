@@ -33,6 +33,7 @@ io.engine.use(sessionMiddleware);
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/xterm', express.static(path.join(__dirname, 'node_modules/xterm')));
 app.use('/xterm-addon-fit', express.static(path.join(__dirname, 'node_modules/xterm-addon-fit')));
+app.use('/forge', express.static(path.join(__dirname, 'node_modules/node-forge/dist')));
 app.use('/api', minioController);
 
 // Rotas do Tutorial de Credenciais de Nuvem

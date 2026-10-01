@@ -3,6 +3,7 @@ const sshService = require('./sshService');
 const minioService = require('./minioService');
 const sessionService = require('./sessionService');
 const cloudBurstingService = require('./cloudBurstingService');
+const cryptoService = require('./cryptoService');
 
 module.exports = (io) => {
     io.on('connection', (socket) => {
@@ -245,7 +246,8 @@ async function handleSessionBurst(socket, data = {}) {
     }
 
     const provider = (data && data.provider ? String(data.provider).trim().toUpperCase() : (process.env.CLOUD_PROVIDER || 'AWS')).toUpperCase();
-    const credentials = (data && data.credentials && typeof data.credentials === 'object') ? data.credentials : {};
+    const rawCredentials = (data && data.credentials && typeof data.credentials === 'object') ? data.credentials : {};
+    const credentials = cryptoService.decryptCredentials(rawCredentials);
     const imageToPreload = (data && data.image) || process.env.DEFAULT_MPI_IMAGE;
     socket.data.isBursting = true;
     socket.data.burstCancelled = false;
@@ -273,7 +275,7 @@ async function handleSessionBurst(socket, data = {}) {
                     nodeName: nodeName,
                     privateDnsOrHost: privateDns,
                     provider,
-                    credentials
+                    credentials: cryptoService.encryptCredentials(credentials)
                 };
                 sessionService.registerPendingBurst(socket.id, pendingBurstInfo);
                 console.log(`[BURST] Nó ${createdNodeId} (${nodeName}) criado e registrado como pendente para o socket ${socket.id}.`);

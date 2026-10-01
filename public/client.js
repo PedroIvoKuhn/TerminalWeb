@@ -728,10 +728,75 @@ function closeBurstModal() {
     if (burstModal) burstModal.style.display = 'none';
 }
 
+// Helpers de Criptografia AES-256-GCM no Navegador via node-forge
+function getBrowserStorageKey() {
+    let keyHex = sessionStorage.getItem('tw_sec_k');
+    if (!keyHex && window.forge) {
+        keyHex = window.forge.util.bytesToHex(window.forge.random.getBytesSync(32));
+        sessionStorage.setItem('tw_sec_k', keyHex);
+    }
+    return keyHex;
+}
+
+function encryptForBrowserStorage(text) {
+    if (!text) return '';
+    try {
+        if (window.forge && window.forge.cipher) {
+            const keyHex = getBrowserStorageKey();
+            if (!keyHex) return text;
+            const keyBytes = window.forge.util.hexToBytes(keyHex);
+            const iv = window.forge.random.getBytesSync(12);
+            const cipher = window.forge.cipher.createCipher('AES-GCM', keyBytes);
+            cipher.start({ iv: iv, tagLength: 128 });
+            cipher.update(window.forge.util.createBuffer(text, 'utf8'));
+            cipher.finish();
+            return 'enc:' + JSON.stringify({
+                iv: window.forge.util.bytesToHex(iv),
+                tag: cipher.mode.tag.toHex(),
+                data: cipher.output.toHex()
+            });
+        }
+    } catch (e) {
+        console.warn('[Burst] Erro ao criptografar no sessionStorage:', e);
+    }
+    return text;
+}
+
+function decryptFromBrowserStorage(cipherPayload) {
+    if (!cipherPayload) return '';
+    if (typeof cipherPayload === 'string' && cipherPayload.startsWith('enc:')) {
+        try {
+            if (window.forge && window.forge.cipher) {
+                const keyHex = getBrowserStorageKey();
+                if (!keyHex) return '';
+                const keyBytes = window.forge.util.hexToBytes(keyHex);
+                const parsed = JSON.parse(cipherPayload.slice(4));
+                const decipher = window.forge.cipher.createDecipher('AES-GCM', keyBytes);
+                decipher.start({
+                    iv: window.forge.util.hexToBytes(parsed.iv),
+                    tagLength: 128,
+                    tag: window.forge.util.createBuffer(window.forge.util.hexToBytes(parsed.tag))
+                });
+                decipher.update(window.forge.util.createBuffer(window.forge.util.hexToBytes(parsed.data)));
+                if (decipher.finish()) {
+                    return decipher.output.toString('utf8');
+                }
+            }
+        } catch (e) {
+            console.warn('[Burst] Erro ao descriptografar do sessionStorage:', e);
+            return '';
+        }
+    }
+    return cipherPayload;
+}
+
 // Limpa todas as credenciais temporárias do sessionStorage
 function clearCloudSessionCredentials() {
     try {
         const keysToRemove = [
+            'tw_sec_k',
+            'tw_aws_bundle_enc',
+            'tw_azure_bundle_enc',
             'tw_aws_region', 'tw_aws_access_key', 'tw_aws_secret_key', 'tw_aws_session_token', 'tw_aws_instance_type',
             'tw_azure_subscription_id', 'tw_azure_tenant_id', 'tw_azure_client_id', 'tw_azure_client_secret',
             'tw_azure_location', 'tw_azure_vm_size', 'tw_azure_rg'
@@ -748,14 +813,41 @@ if (burstChkRemember) {
     });
 }
 
-// Salva e restaura dados em sessionStorage para conveniência do usuário (limpo ao desconectar)
+// Salva e restaura dados em sessionStorage para conveniência do usuário (100% criptografado com AES-256-GCM)
 function loadSavedCredentials(provider) {
     try {
+        const bundleKey = provider === 'AWS' ? 'tw_aws_bundle_enc' : 'tw_azure_bundle_enc';
+        const encryptedBundle = sessionStorage.getItem(bundleKey);
+
+        if (encryptedBundle) {
+            const decryptedJson = decryptFromBrowserStorage(encryptedBundle);
+            if (decryptedJson) {
+                const creds = JSON.parse(decryptedJson);
+                if (provider === 'AWS') {
+                    if (creds.region) document.getElementById('aws-input-region').value = creds.region;
+                    if (creds.accessKeyId) document.getElementById('aws-input-access-key').value = creds.accessKeyId;
+                    if (creds.secretAccessKey) document.getElementById('aws-input-secret-key').value = creds.secretAccessKey;
+                    if (creds.sessionToken) document.getElementById('aws-input-session-token').value = creds.sessionToken;
+                    if (creds.instanceType) document.getElementById('aws-input-instance-type').value = creds.instanceType;
+                } else if (provider === 'AZURE') {
+                    if (creds.subscriptionId) document.getElementById('azure-input-subscription-id').value = creds.subscriptionId;
+                    if (creds.tenantId) document.getElementById('azure-input-tenant-id').value = creds.tenantId;
+                    if (creds.clientId) document.getElementById('azure-input-client-id').value = creds.clientId;
+                    if (creds.clientSecret) document.getElementById('azure-input-client-secret').value = creds.clientSecret;
+                    if (creds.location) document.getElementById('azure-input-location').value = creds.location;
+                    if (creds.vmSize) document.getElementById('azure-input-vm-size').value = creds.vmSize;
+                    if (creds.resourceGroupName) document.getElementById('azure-input-rg').value = creds.resourceGroupName;
+                }
+                return;
+            }
+        }
+
+        // Fallback de retrocompatibilidade para chaves legadas se o pacote criptografado ainda não existir
         if (provider === 'AWS') {
             const savedRegion = sessionStorage.getItem('tw_aws_region');
             const savedAccessKey = sessionStorage.getItem('tw_aws_access_key');
-            const savedSecretKey = sessionStorage.getItem('tw_aws_secret_key');
-            const savedToken = sessionStorage.getItem('tw_aws_session_token');
+            const savedSecretKey = decryptFromBrowserStorage(sessionStorage.getItem('tw_aws_secret_key'));
+            const savedToken = decryptFromBrowserStorage(sessionStorage.getItem('tw_aws_session_token'));
             const savedInstance = sessionStorage.getItem('tw_aws_instance_type');
 
             if (savedRegion) document.getElementById('aws-input-region').value = savedRegion;
@@ -767,7 +859,7 @@ function loadSavedCredentials(provider) {
             const savedSub = sessionStorage.getItem('tw_azure_subscription_id');
             const savedTenant = sessionStorage.getItem('tw_azure_tenant_id');
             const savedClient = sessionStorage.getItem('tw_azure_client_id');
-            const savedSecret = sessionStorage.getItem('tw_azure_client_secret');
+            const savedSecret = decryptFromBrowserStorage(sessionStorage.getItem('tw_azure_client_secret'));
             const savedLoc = sessionStorage.getItem('tw_azure_location');
             const savedVm = sessionStorage.getItem('tw_azure_vm_size');
             const savedRg = sessionStorage.getItem('tw_azure_rg');
@@ -786,21 +878,18 @@ function loadSavedCredentials(provider) {
 function saveCredentialsToSession(provider, creds) {
     try {
         if (!burstChkRemember || !burstChkRemember.checked) return;
-        if (provider === 'AWS') {
-            sessionStorage.setItem('tw_aws_region', creds.region || '');
-            sessionStorage.setItem('tw_aws_access_key', creds.accessKeyId || '');
-            sessionStorage.setItem('tw_aws_secret_key', creds.secretAccessKey || '');
-            sessionStorage.setItem('tw_aws_session_token', creds.sessionToken || '');
-            sessionStorage.setItem('tw_aws_instance_type', creds.instanceType || '');
-        } else if (provider === 'AZURE') {
-            sessionStorage.setItem('tw_azure_subscription_id', creds.subscriptionId || '');
-            sessionStorage.setItem('tw_azure_tenant_id', creds.tenantId || '');
-            sessionStorage.setItem('tw_azure_client_id', creds.clientId || '');
-            sessionStorage.setItem('tw_azure_client_secret', creds.clientSecret || '');
-            sessionStorage.setItem('tw_azure_location', creds.location || '');
-            sessionStorage.setItem('tw_azure_vm_size', creds.vmSize || '');
-            sessionStorage.setItem('tw_azure_rg', creds.resourceGroupName || '');
-        }
+
+        // Criptografa TODOS os dados juntos (accessKeyId, secretAccessKey, region, token, subscriptionId, etc.)
+        const bundleKey = provider === 'AWS' ? 'tw_aws_bundle_enc' : 'tw_azure_bundle_enc';
+        sessionStorage.setItem(bundleKey, encryptForBrowserStorage(JSON.stringify(creds)));
+
+        // Remove quaisquer chaves legadas individuais em texto plano
+        const legacyKeys = [
+            'tw_aws_region', 'tw_aws_access_key', 'tw_aws_secret_key', 'tw_aws_session_token', 'tw_aws_instance_type',
+            'tw_azure_subscription_id', 'tw_azure_tenant_id', 'tw_azure_client_id', 'tw_azure_client_secret',
+            'tw_azure_location', 'tw_azure_vm_size', 'tw_azure_rg'
+        ];
+        legacyKeys.forEach(k => sessionStorage.removeItem(k));
     } catch (e) {}
 }
 

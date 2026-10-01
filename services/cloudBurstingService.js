@@ -6,6 +6,7 @@ const os = require('os');
 
 const awsBurster = require('./cloud/awsService');
 const azureBurster = require('./cloud/azureService');
+const cryptoService = require('./cryptoService');
 
 const providers = {
     AWS: awsBurster,
@@ -64,7 +65,8 @@ function getEnvCredentials(providerName) {
  */
 async function validateCredentials(provider, credentials = {}) {
     const { name, module } = resolveProvider(provider);
-    const resolvedCredentials = { ...getEnvCredentials(name), ...credentials };
+    const plainCredentials = cryptoService.decryptCredentials(credentials);
+    const resolvedCredentials = { ...getEnvCredentials(name), ...(plainCredentials || {}) };
     return await module.validateCredentials(resolvedCredentials);
 }
 
@@ -210,7 +212,8 @@ async function waitForNodeInCluster(nodePrefixOrNames, timeoutMs = 420000, onPro
  */
 async function addNode({ provider, credentials, customJoinCommand, onProgress, onCreated, isCancelled, tags = {}, imageToPreload } = {}) {
     const { name, module } = resolveProvider(provider);
-    const resolvedCredentials = { ...getEnvCredentials(name), ...(credentials || {}) };
+    const plainCredentials = cryptoService.decryptCredentials(credentials);
+    const resolvedCredentials = { ...getEnvCredentials(name), ...(plainCredentials || {}) };
 
     if (onProgress) onProgress(1, `Validando credenciais na ${name}...`);
 
@@ -265,7 +268,7 @@ async function addNode({ provider, credentials, customJoinCommand, onProgress, o
         nodeId,
         nodeName: effectiveNodeName,
         provider: name,
-        credentials: resolvedCredentials
+        credentials: cryptoService.encryptCredentials(resolvedCredentials)
     };
 }
 
@@ -274,7 +277,8 @@ async function addNode({ provider, credentials, customJoinCommand, onProgress, o
  */
 async function removeNode({ nodeId, nodeName, provider, credentials, privateDnsOrHost } = {}) {
     const { name, module } = resolveProvider(provider);
-    const resolvedCredentials = { ...getEnvCredentials(name), ...(credentials || {}) };
+    const plainCredentials = cryptoService.decryptCredentials(credentials);
+    const resolvedCredentials = { ...getEnvCredentials(name), ...(plainCredentials || {}) };
 
     const hostnamesToRemove = [privateDnsOrHost, nodeName, nodeId].filter(Boolean);
     for (const host of hostnamesToRemove) {
@@ -299,7 +303,8 @@ async function removeNode({ nodeId, nodeName, provider, credentials, privateDnsO
  */
 async function listBurstNodes({ provider, credentials } = {}) {
     const { name, module } = resolveProvider(provider);
-    const resolvedCredentials = { ...getEnvCredentials(name), ...(credentials || {}) };
+    const plainCredentials = cryptoService.decryptCredentials(credentials);
+    const resolvedCredentials = { ...getEnvCredentials(name), ...(plainCredentials || {}) };
     return await module.listBurstNodes(resolvedCredentials);
 }
 
