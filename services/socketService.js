@@ -271,19 +271,23 @@ async function handleSessionBurst(socket, data = {}) {
     const rawCredentials = (data && data.credentials && typeof data.credentials === 'object') ? data.credentials : {};
     const credentials = cryptoService.decryptCredentials(rawCredentials);
     const imageToPreload = (data && data.image) || process.env.DEFAULT_MPI_IMAGE;
+    const rawCount = data.vmCount || (data.credentials && data.credentials.vmCount) || 1;
+    const vmCount = Math.min(Math.max(parseInt(rawCount, 10) || 1, 1), 2);
+
     socket.data.isBursting = true;
     socket.data.burstCancelled = false;
 
-    let pendingBurstInfo = null;
+    const pendingBurstInfos = [];
 
     try {
-        console.log(`[Socket ${socket.id}] Iniciando solicitação de Cloud Bursting para ${provider}... (Imagem: ${imageToPreload || 'padrão'})`);
-        socket.emit('burst:step', { step: 1, message: `Iniciando validação para nuvem ${provider}...` });
+        console.log(`[Socket ${socket.id}] Iniciando solicitação de Cloud Bursting para ${provider} (${vmCount} VM(s))... (Imagem: ${imageToPreload || 'padrão'})`);
+        socket.emit('burst:step', { step: 1, message: `Iniciando validação para nuvem ${provider} (${vmCount} máquina${vmCount > 1 ? 's' : ''})...` });
 
         const result = await cloudBurstingService.addNode({
             provider,
             credentials,
             imageToPreload,
+            vmCount,
             tags: {
                 socketId: socket.id,
                 jobId: socket.data.jobId || `pending-${socket.id}`,
@@ -292,19 +296,20 @@ async function handleSessionBurst(socket, data = {}) {
             onCreated: (createdNodeId, meta = {}) => {
                 const nodeName = (meta && meta.nodeName) ? meta.nodeName : createdNodeId;
                 const privateDns = (meta && meta.privateDns) ? meta.privateDns : null;
-                pendingBurstInfo = {
+                const nodeInfo = {
                     nodeId: createdNodeId,
                     nodeName: nodeName,
                     privateDnsOrHost: privateDns,
                     provider,
                     credentials: cryptoService.encryptCredentials(credentials)
                 };
-                sessionService.registerPendingBurst(socket.id, pendingBurstInfo);
+                pendingBurstInfos.push(nodeInfo);
+                sessionService.registerPendingBurst(socket.id, nodeInfo);
                 console.log(`[BURST] Nó ${createdNodeId} (${nodeName}) criado e registrado como pendente para o socket ${socket.id}.`);
 
                 // Se o socket desconectou enquanto a VM era provisionada, destrói imediatamente!
                 if (socket.disconnected || socket.data.isDisconnected) {
-                    console.warn(`[BURST] Socket ${socket.id} já desconectou! Limpando nó ${createdNodeId} imediatamente...`);
+                    console.warn(`[BURST] Socket ${socket.id} já desconectou! Limpando nós imediatamente...`);
                     sessionService.cleanupPendingBurst(socket.id);
                 }
             },
@@ -320,32 +325,37 @@ async function handleSessionBurst(socket, data = {}) {
 
         // Se o socket desconectou durante a espera do join
         if (socket.disconnected || socket.data.isDisconnected) {
-            console.warn(`[BURST] Socket ${socket.id} desconectou antes da conclusão! Limpando nó pendente...`);
+            console.warn(`[BURST] Socket ${socket.id} desconectou antes da conclusão! Limpando nó(s) pendente(s)...`);
             await sessionService.cleanupPendingBurst(socket.id);
             return;
         }
 
-        // Se o usuário já tiver uma sessão ativa vincula ao JobId
-        if (socket.data.jobId) {
-            sessionService.registerBurstNode(socket.data.jobId, result);
-        } else {
-            // Caso contrário, atualiza como pendente com nodeName oficial
-            sessionService.registerPendingBurst(socket.id, result);
+        const finalNodes = (result && result.nodes) ? result.nodes : [result];
+        for (const node of finalNodes) {
+            // Se o usuário já tiver uma sessão ativa vincula ao JobId
+            if (socket.data.jobId) {
+                sessionService.registerBurstNode(socket.data.jobId, node);
+            } else {
+                // Caso contrário, atualiza como pendente com nodeName oficial
+                sessionService.registerPendingBurst(socket.id, node);
+            }
         }
 
         socket.data.hasBurstNode = true;
         socket.emit('burst:complete', {
+            count: finalNodes.length,
+            nodes: finalNodes,
             nodeId: result.nodeId,
             nodeName: result.nodeName || result.nodeId,
             provider: result.provider
         });
-        console.log(`[Socket ${socket.id}] Cloud Bursting concluído com sucesso. NodeId: ${result.nodeId}`);
+        console.log(`[Socket ${socket.id}] Cloud Bursting concluído com sucesso. ${finalNodes.length} nó(s) integrado(s).`);
     } catch (err) {
         console.error(`[Socket ${socket.id}] Erro no Cloud Bursting:`, err.message);
 
-        // Se a máquina chegou a ser criada na nuvem mas a operação falhou depois (ou socket fechou), limpa imediatamente!
-        if (pendingBurstInfo && pendingBurstInfo.nodeId) {
-            console.log(`[BURST] Destruindo máquina ${pendingBurstInfo.nodeId} devido a erro/cancelamento no socket ${socket.id}...`);
+        // Se qualquer máquina chegou a ser criada na nuvem mas a operação falhou depois (ou socket fechou), limpa imediatamente!
+        if (pendingBurstInfos.length > 0) {
+            console.log(`[BURST] Destruindo ${pendingBurstInfos.length} máquina(s) pendente(s) devido a erro/cancelamento no socket ${socket.id}...`);
             await sessionService.cleanupPendingBurst(socket.id);
         }
 

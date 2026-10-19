@@ -845,6 +845,7 @@ function loadSavedCredentials(provider) {
                     if (creds.secretAccessKey) document.getElementById('aws-input-secret-key').value = creds.secretAccessKey;
                     if (creds.sessionToken) document.getElementById('aws-input-session-token').value = creds.sessionToken;
                     if (creds.instanceType) document.getElementById('aws-input-instance-type').value = creds.instanceType;
+                    if (creds.vmCount && document.getElementById('aws-input-vm-count')) document.getElementById('aws-input-vm-count').value = creds.vmCount;
                 } else if (provider === 'AZURE') {
                     if (creds.subscriptionId) document.getElementById('azure-input-subscription-id').value = creds.subscriptionId;
                     if (creds.tenantId) document.getElementById('azure-input-tenant-id').value = creds.tenantId;
@@ -853,6 +854,7 @@ function loadSavedCredentials(provider) {
                     if (creds.location) document.getElementById('azure-input-location').value = creds.location;
                     if (creds.vmSize) document.getElementById('azure-input-vm-size').value = creds.vmSize;
                     if (creds.resourceGroupName) document.getElementById('azure-input-rg').value = creds.resourceGroupName;
+                    if (creds.vmCount && document.getElementById('azure-input-vm-count')) document.getElementById('azure-input-vm-count').value = creds.vmCount;
                 }
                 return;
             }
@@ -998,6 +1000,7 @@ if (burstCredentialsForm) {
         if (burstFormFeedback) burstFormFeedback.style.display = 'none';
 
         let credentials = {};
+        let vmCount = 1;
 
         if (selectedCloudProvider === 'AWS') {
             const region = document.getElementById('aws-input-region').value;
@@ -1005,6 +1008,7 @@ if (burstCredentialsForm) {
             const secretAccessKey = (document.getElementById('aws-input-secret-key').value || '').trim();
             const sessionToken = (document.getElementById('aws-input-session-token').value || '').trim();
             const instanceType = document.getElementById('aws-input-instance-type').value;
+            vmCount = parseInt(document.getElementById('aws-input-vm-count')?.value, 10) || 1;
 
             if (!accessKeyId || !secretAccessKey) {
                 if (burstFormFeedback) {
@@ -1014,7 +1018,7 @@ if (burstCredentialsForm) {
                 return;
             }
 
-            credentials = { region, accessKeyId, secretAccessKey, instanceType };
+            credentials = { region, accessKeyId, secretAccessKey, instanceType, vmCount };
             if (sessionToken) credentials.sessionToken = sessionToken;
         } else {
             const subscriptionId = (document.getElementById('azure-input-subscription-id').value || '').trim();
@@ -1024,6 +1028,7 @@ if (burstCredentialsForm) {
             const location = document.getElementById('azure-input-location').value;
             const vmSize = document.getElementById('azure-input-vm-size').value;
             const resourceGroupName = (document.getElementById('azure-input-rg').value || 'CloudBurstingRG').trim();
+            vmCount = parseInt(document.getElementById('azure-input-vm-count')?.value, 10) || 1;
 
             if (!subscriptionId || !tenantId || !clientId || !clientSecret) {
                 if (burstFormFeedback) {
@@ -1033,9 +1038,16 @@ if (burstCredentialsForm) {
                 return;
             }
 
-            credentials = { subscriptionId, tenantId, clientId, clientSecret, location, vmSize, resourceGroupName };
+            credentials = { subscriptionId, tenantId, clientId, clientSecret, location, vmSize, resourceGroupName, vmCount };
         }
 
+        const activeCountEl = (selectedCloudProvider === 'AWS')
+            ? document.getElementById('aws-input-vm-count')
+            : document.getElementById('azure-input-vm-count');
+        vmCount = activeCountEl ? (parseInt(activeCountEl.value, 10) || 1) : 1;
+        console.log(`[BURST CLIENT] Provider: ${selectedCloudProvider}, vmCount lido: ${vmCount}`);
+
+        credentials.vmCount = vmCount;
         saveCredentialsToSession(selectedCloudProvider, credentials);
 
         // Prepara tela de progresso
@@ -1043,16 +1055,19 @@ if (burstCredentialsForm) {
         const activeImage = imageMeta ? imageMeta.getAttribute('content') : null;
 
         resetBurstModal();
+        logBurstConsole(`Solicitando expansão do cluster com ${vmCount} máquina(s) virtual(is) (${selectedCloudProvider})...`);
+
         if (burstProviderBadge) burstProviderBadge.textContent = selectedCloudProvider;
         if (burstProgressSubtitle) {
-            burstProgressSubtitle.textContent = `Provisionando nó na nuvem ${selectedCloudProvider} e integrando via VPN...`;
+            burstProgressSubtitle.textContent = `Provisionando ${vmCount > 1 ? `${vmCount} nós` : 'nó'} na nuvem ${selectedCloudProvider} e integrando via VPN...`;
         }
 
         showBurstView('progress');
         socket.emit('burst:start', {
             provider: selectedCloudProvider,
             credentials,
-            image: activeImage
+            image: activeImage,
+            vmCount
         });
     });
 }
@@ -1135,14 +1150,19 @@ socket.on('burst:step', ({ step, message }) => {
     setBurstStep(step, 'active');
 });
 
-socket.on('burst:complete', ({ nodeId, nodeName, provider }) => {
+socket.on('burst:complete', ({ nodeId, nodeName, provider, count, nodes }) => {
     isBurstConnected = true;
     connectedCloudProvider = provider || selectedCloudProvider;
     for (let i = 1; i <= 4; i++) {
         setBurstStep(i, 'success');
     }
-    const displayName = nodeName || nodeId;
-    logBurstConsole(`✅ Sucesso! Nó ${displayName} (${connectedCloudProvider}) integrado ao cluster MicroK8s.`);
+    const nodeCount = count || (nodes ? nodes.length : 1);
+    const isMulti = nodeCount > 1;
+    const displayName = isMulti
+        ? `${nodeCount} nós (${nodes ? nodes.map(n => n.nodeName || n.nodeId).join(', ') : `${nodeCount} instâncias`})`
+        : (nodeName || nodeId);
+
+    logBurstConsole(`✅ Sucesso! ${isMulti ? `${nodeCount} nós integrados` : `Nó ${displayName}`} (${connectedCloudProvider}) ao cluster MicroK8s.`);
 
     if (btnBurstFinish) btnBurstFinish.style.display = 'inline-block';
     if (btnBurstCancel) btnBurstCancel.style.display = 'none';
@@ -1150,7 +1170,7 @@ socket.on('burst:complete', ({ nodeId, nodeName, provider }) => {
 
     if (btnBursting) {
         const textSpan = btnBursting.querySelector('.burst-btn-text');
-        if (textSpan) textSpan.textContent = `${connectedCloudProvider} Conectada`;
+        if (textSpan) textSpan.textContent = isMulti ? `${connectedCloudProvider} Conectada (${nodeCount}x)` : `${connectedCloudProvider} Conectada`;
         btnBursting.classList.add('connected');
     }
     if (burstStatusBadge) {

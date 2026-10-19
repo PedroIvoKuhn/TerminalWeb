@@ -108,112 +108,160 @@ async function generateJoinCommand() {
 }
 
 /**
- * Aguarda ativamente até que o nó de burst apareça no MicroK8s
+ * Aplica isolamento de tenant em um nó do Kubernetes (Label e Taint)
  */
-async function waitForNodeInCluster(nodePrefixOrNames, timeoutMs = 420000, onProgress, isCancelled) {
+async function applyTenantIsolation(nodeName, userId) {
+    if (!userId || !nodeName) return;
+    const tenantTag = `user-${String(userId).toLowerCase().replace(/[^a-z0-9-_]/g, '-').slice(0, 63)}`;
+    console.log(`[BURST] Isolando nó ${nodeName} exclusivamente para ${tenantTag}...`);
+    try {
+        await execAsync(`microk8s kubectl label node ${nodeName} tenant=${tenantTag} --overwrite`);
+        await execAsync(`microk8s kubectl taint nodes ${nodeName} tenant=${tenantTag}:NoSchedule --overwrite`);
+        console.log(`[BURST] Nó ${nodeName} isolado com sucesso (Label tenant=${tenantTag} e Taint aplicados).`);
+    } catch (isolateErr) {
+        console.warn(`[BURST AVISO] Falha ao aplicar Label/Taint no nó ${nodeName}:`, isolateErr.message);
+    }
+}
+
+/**
+ * Aguarda ativamente até que múltiplos nós de burst apareçam no MicroK8s e fiquem Ready
+ */
+async function waitForMultipleNodesInCluster(targetsList, timeoutMs = 450000, onProgress, isCancelled) {
     const startTime = Date.now();
-    const targets = (Array.isArray(nodePrefixOrNames) ? nodePrefixOrNames : [nodePrefixOrNames])
-        .map(t => String(t).trim().toLowerCase())
-        .filter(Boolean);
-
-    const displayName = targets[0] || 'burst-node';
-    console.log(`[BURST] Monitorando cluster: aguardando nós candidatos [${targets.join(', ')}] aparecerem no MicroK8s (timeout: ${timeoutMs / 1000}s)...`);
-
-    let sawInTailscale = false;
-    let calicoRestartTriggered = false;
+    const pendingTargets = [...targetsList];
+    const readyNodes = [];
+    const seenInTailscale = new Set();
+    const calicoRestarted = new Set();
     let lastProgressNotice = Date.now();
+
+    console.log(`[BURST] Monitorando cluster: aguardando ${targetsList.length} nó(s) [${targetsList.map(t => t.targetId).join(', ')}] (timeout: ${timeoutMs / 1000}s)...`);
 
     while (Date.now() - startTime < timeoutMs) {
         if (isCancelled && isCancelled()) {
-            console.log(`[BURST] Operação cancelada / socket fechado para o nó ${displayName}.`);
-            return { joined: false, ready: false, cancelled: true };
+            return { allJoined: false, cancelled: true };
         }
 
         const elapsedSec = Math.round((Date.now() - startTime) / 1000);
 
-        // 1. Verifica se o nó já apareceu no Tailscale para dar feedback ao usuário
-        if (!sawInTailscale) {
-            try {
-                const { stdout: tsOut } = await execAsync('tailscale status');
-                const tsLower = tsOut.toLowerCase();
-                const matchedTs = targets.find(t => tsLower.includes(t));
-                if (matchedTs) {
-                    sawInTailscale = true;
-                    console.log(`[BURST] Nó ${matchedTs} conectado com sucesso à rede Tailscale!`);
-                    if (onProgress) onProgress(3, `Nó conectado à VPN Tailscale! Instalando MicroK8s na nuvem e executando join...`);
-                }
-            } catch (e) {}
-        }
-
-        // 2. Consulta os nós do MicroK8s
+        // 1. Checa Tailscale
         try {
-            const { stdout } = await execAsync('microk8s kubectl get nodes -o json');
-            const data = JSON.parse(stdout);
-            const nodes = data.items || [];
-
-            const foundNode = nodes.find(n => {
-                const name = (n.metadata?.name || '').toLowerCase();
-                return targets.some(t => name.includes(t) || t.includes(name));
-            });
-
-            if (foundNode) {
-                const name = foundNode.metadata.name;
-                const readyCondition = foundNode.status?.conditions?.find(c => c.type === 'Ready');
-                const isReady = readyCondition && readyCondition.status === 'True';
-                const internalIp = foundNode.status?.addresses?.find(a => a.type === 'InternalIP')?.address;
-                const vpnIpReady = Boolean(internalIp && internalIp.startsWith('100.'));
-
-                if (isReady && vpnIpReady) {
-                    console.log(`[BURST] Nó ${name} está no cluster com IP da VPN (${internalIp}) e em estado Ready!`);
-                    if (onProgress) onProgress(4, `Nó ${name} pronto e integrado ao cluster MicroK8s!`);
-                    return { joined: true, ready: true, nodeName: name };
-                } else {
-                    console.log(`[BURST] Nó ${name} detectado no cluster (IP atual: ${internalIp || 'pendente'}, Ready: ${isReady}). Aguardando anúncio do IP da VPN Tailscale (100.x.x.x)...`);
-                    if (onProgress) onProgress(4, `Nó ${name} detectado no cluster! Aguardando sincronização de rede VPN e kubelet...`);
-
-                    // Se o calico-node falhou nos primeiros segundos por causa de inicialização assíncrona,
-                    // reinicia o pod calico-node deste nó para que ele não fique esperando o tempo de backoff
-                    if (!calicoRestartTriggered && elapsedSec >= 20) {
-                        calicoRestartTriggered = true;
-                        console.log(`[BURST] Nó ${name} aguardando rede. Reiniciando pod calico-node para inicialização imediata...`);
-                        execAsync(`microk8s kubectl delete pod -n kube-system -l k8s-app=calico-node --field-selector spec.nodeName=${name}`).catch(() => {});
+            const { stdout: tsOut } = await execAsync('tailscale status');
+            const tsLower = tsOut.toLowerCase();
+            for (const t of targetsList) {
+                if (!seenInTailscale.has(t.targetId)) {
+                    const matched = t.expectedNames.some(name => tsLower.includes(name.toLowerCase()));
+                    if (matched) {
+                        seenInTailscale.add(t.targetId);
+                        console.log(`[BURST] Nó ${t.targetId} conectado à rede Tailscale! (${seenInTailscale.size}/${targetsList.length})`);
+                        if (onProgress) {
+                            onProgress(3, `${seenInTailscale.size}/${targetsList.length} nó(s) conectado(s) à VPN Tailscale! Instalando MicroK8s...`);
+                        }
                     }
                 }
             }
         } catch (e) {}
 
-        // Notifica progresso periódico a cada ~25 segundos
+        // 2. Checa nós do MicroK8s
+        try {
+            const { stdout } = await execAsync('microk8s kubectl get nodes -o json');
+            const data = JSON.parse(stdout);
+            const nodes = data.items || [];
+
+            for (let i = pendingTargets.length - 1; i >= 0; i--) {
+                const target = pendingTargets[i];
+                const foundNode = nodes.find(n => {
+                    const name = (n.metadata?.name || '').toLowerCase();
+                    return target.expectedNames.some(t => {
+                        const lowT = t.toLowerCase();
+                        return name.includes(lowT) || lowT.includes(name);
+                    });
+                });
+
+                if (foundNode) {
+                    const name = foundNode.metadata.name;
+                    const readyCondition = foundNode.status?.conditions?.find(c => c.type === 'Ready');
+                    const isReady = readyCondition && readyCondition.status === 'True';
+                    const internalIp = foundNode.status?.addresses?.find(a => a.type === 'InternalIP')?.address;
+                    const vpnIpReady = Boolean(internalIp && internalIp.startsWith('100.'));
+
+                    if (isReady && vpnIpReady) {
+                        console.log(`[BURST] Nó ${name} (${target.targetId}) pronto no cluster com IP VPN ${internalIp}!`);
+                        readyNodes.push({
+                            targetId: target.targetId,
+                            nodeId: target.targetId,
+                            nodeName: name,
+                            internalIp
+                        });
+                        pendingTargets.splice(i, 1);
+                        if (onProgress) {
+                            onProgress(4, `${readyNodes.length}/${targetsList.length} nó(s) pronto(s) e integrado(s) ao cluster!`);
+                        }
+                    } else {
+                        // Se o calico-node falhou nos primeiros segundos por causa de inicialização assíncrona,
+                        // reinicia o pod calico-node deste nó para não aguardar timeout
+                        if (!calicoRestarted.has(name) && elapsedSec >= 20) {
+                            calicoRestarted.add(name);
+                            console.log(`[BURST] Nó ${name} aguardando rede. Reiniciando pod calico-node para inicialização imediata...`);
+                            execAsync(`microk8s kubectl delete pod -n kube-system -l k8s-app=calico-node --field-selector spec.nodeName=${name}`).catch(() => {});
+                        }
+                    }
+                }
+            }
+
+            if (pendingTargets.length === 0) {
+                console.log(`[BURST] Todos os ${targetsList.length} nós estão prontos e integrados ao cluster!`);
+                return { allJoined: true, readyNodes };
+            }
+        } catch (e) {}
+
+        // Notifica progresso periódico a cada ~25s
         if (Date.now() - lastProgressNotice > 25000 && onProgress) {
             lastProgressNotice = Date.now();
-            const msg = sawInTailscale
-                ? `Nó conectado na VPN. Instalando pacotes e realizando join (${elapsedSec}s decorridos)...`
-                : `Aguardando boot da máquina e conexão à VPN (${elapsedSec}s decorridos)...`;
+            const msg = `Aguardando nós no cluster (${readyNodes.length}/${targetsList.length} prontos, ${elapsedSec}s decorridos)...`;
             onProgress(3, msg);
         }
 
         await new Promise(r => setTimeout(r, 6000));
     }
 
-    console.warn(`[BURST AVISO] Timeout (${timeoutMs / 1000}s) aguardando nó ${displayName} no cluster.`);
-    return { joined: false, ready: false };
+    return {
+        allJoined: false,
+        readyNodes,
+        missingTargets: pendingTargets.map(t => t.targetId)
+    };
 }
 
 /**
- * Provisiona um novo nó na nuvem informada usando as credenciais passadas
+ * Aguarda ativamente até que o nó de burst apareça no MicroK8s (wrapper)
+ */
+async function waitForNodeInCluster(nodePrefixOrNames, timeoutMs = 420000, onProgress, isCancelled) {
+    const targets = (Array.isArray(nodePrefixOrNames) ? nodePrefixOrNames : [nodePrefixOrNames])
+        .map(t => String(t).trim().toLowerCase())
+        .filter(Boolean);
+    const res = await waitForMultipleNodesInCluster([{ targetId: targets[0] || 'burst-node', expectedNames: targets }], timeoutMs, onProgress, isCancelled);
+    if (res.cancelled) return { joined: false, ready: false, cancelled: true };
+    if (!res.allJoined) return { joined: false, ready: false };
+    return { joined: true, ready: true, nodeName: res.readyNodes[0]?.nodeName };
+}
+
+/**
+ * Provisiona novos nós na nuvem informada (1 ou 2 máquinas) usando as credenciais passadas
  * @param {Object} options
  * @param {string} options.provider - 'AWS' | 'AZURE'
  * @param {Object} [options.credentials] - Credenciais da nuvem (se omitido, usa .env)
+ * @param {number} [options.vmCount=1] - Quantidade de instâncias a provisionar (1 ou 2)
  * @param {string} [options.customJoinCommand] - Comando de join pré-gerado (opcional)
  * @param {Function} [options.onProgress] - Callback para notificar progresso (step, message)
- * @param {Function} [options.onCreated] - Callback chamado assim que o nó é instanciado na nuvem
+ * @param {Function} [options.onCreated] - Callback chamado assim que cada nó é instanciado na nuvem
  * @param {Function} [options.isCancelled] - Função que verifica se a operação foi cancelada
  * @param {Object} [options.tags] - Metadados de tags (jobId, socketId, etc.)
  * @param {string} [options.imageToPreload] - Imagem Docker para pré-download na nuvem
  */
-async function addNode({ provider, credentials, customJoinCommand, onProgress, onCreated, isCancelled, tags = {}, imageToPreload } = {}) {
+async function addNode({ provider, credentials, customJoinCommand, onProgress, onCreated, isCancelled, tags = {}, imageToPreload, vmCount = 1 } = {}) {
     const { name, module } = resolveProvider(provider);
     const plainCredentials = cryptoService.decryptCredentials(credentials);
     const resolvedCredentials = { ...getEnvCredentials(name), ...(plainCredentials || {}) };
+    const targetCount = Math.min(Math.max(parseInt(vmCount, 10) || 1, 1), 2);
 
     if (onProgress) onProgress(1, `Validando credenciais na ${name}...`);
 
@@ -223,53 +271,145 @@ async function addNode({ provider, credentials, customJoinCommand, onProgress, o
         throw new Error(`Falha na validação das credenciais na ${name}: ${authCheck.error}`);
     }
 
-    if (onProgress) onProgress(2, `Gerando token do MicroK8s e criando máquina virtual na ${name}...`);
-    const joinCommand = customJoinCommand || await generateJoinCommand();
-
-    console.log(`[BURST] Adicionando nó na nuvem ${name}...${imageToPreload ? ` (Preload: ${imageToPreload})` : ''}`);
-    const addResult = await module.addNode(joinCommand, resolvedCredentials, { onProgress, tags, onCreated, imageToPreload });
-    const nodeId = typeof addResult === 'object' ? addResult.nodeId : addResult;
-    const nodeName = typeof addResult === 'object' ? (addResult.nodeName || addResult.nodeId) : addResult;
-    const expectedNames = typeof addResult === 'object' && Array.isArray(addResult.expectedNames)
-        ? addResult.expectedNames
-        : [nodeId, nodeName].filter(Boolean);
-
-    if (isCancelled && isCancelled()) {
-        throw new Error(`Operação cancelada antes do monitoramento do nó ${nodeId}.`);
+    // Se for Azure, garante infraestrutura básica (RG, VNet, Subnet) de forma atômica antes de criar as VMs
+    if (name === 'AZURE' && typeof module.ensureInfrastructure === 'function') {
+        if (onProgress) onProgress(2, `Garantindo infraestrutura básica na Azure...`);
+        await module.ensureInfrastructure(resolvedCredentials);
     }
 
-    if (onProgress) onProgress(3, `Instância criada! Aguardando boot e join no cluster...`);
+    const baseTs = Date.now();
 
-    // Aguarda ativamente até que o nó apareça no cluster (timeout de 7 minutos)
-    const clusterResult = await waitForNodeInCluster(expectedNames, 420000, onProgress, isCancelled);
-    if (clusterResult.cancelled) {
-        throw new Error(`Operação cancelada pelo usuário enquanto aguardava o nó ${nodeId}.`);
-    }
-    if (!clusterResult.joined) {
-        throw new Error(`A máquina virtual ${nodeId} foi criada na ${name}, mas o MicroK8s não concluiu o join dentro do tempo limite. Verifique os logs em /var/log/burst-init.log na instância.`);
-    }
+    if (targetCount === 1) {
+        if (onProgress) onProgress(2, `Gerando token do MicroK8s e criando máquina virtual na ${name}...`);
+        const joinCommand = customJoinCommand || await generateJoinCommand();
 
-    const effectiveNodeName = clusterResult.nodeName || nodeName || nodeId;
+        console.log(`[BURST] Adicionando 1 nó na nuvem ${name}...${imageToPreload ? ` (Preload: ${imageToPreload})` : ''}`);
+        const addResult = await module.addNode(joinCommand, resolvedCredentials, {
+            onProgress,
+            tags,
+            onCreated,
+            imageToPreload,
+            skipEnsureInfra: name === 'AZURE'
+        });
+        const nodeId = typeof addResult === 'object' ? addResult.nodeId : addResult;
+        const nodeName = typeof addResult === 'object' ? (addResult.nodeName || addResult.nodeId) : addResult;
+        const expectedNames = typeof addResult === 'object' && Array.isArray(addResult.expectedNames)
+            ? addResult.expectedNames
+            : [nodeId, nodeName].filter(Boolean);
 
-    // Aplica isolamento de tenant no nó (Label + Taint)
-    if (tags.userId) {
-        const tenantTag = `user-${String(tags.userId).toLowerCase().replace(/[^a-z0-9-_]/g, '-').slice(0, 63)}`;
-        console.log(`[BURST] Isolando nó ${effectiveNodeName} exclusivamente para ${tenantTag}...`);
-        try {
-            await execAsync(`microk8s kubectl label node ${effectiveNodeName} tenant=${tenantTag} --overwrite`);
-            await execAsync(`microk8s kubectl taint nodes ${effectiveNodeName} tenant=${tenantTag}:NoSchedule --overwrite`);
-            console.log(`[BURST] Nó ${effectiveNodeName} isolado com sucesso (Label tenant=${tenantTag} e Taint aplicados).`);
-        } catch (isolateErr) {
-            console.warn(`[BURST AVISO] Falha ao aplicar Label/Taint no nó ${effectiveNodeName}:`, isolateErr.message);
+        if (isCancelled && isCancelled()) {
+            throw new Error(`Operação cancelada antes do monitoramento do nó ${nodeId}.`);
         }
-    }
 
-    return {
-        nodeId,
-        nodeName: effectiveNodeName,
-        provider: name,
-        credentials: cryptoService.encryptCredentials(resolvedCredentials)
-    };
+        if (onProgress) onProgress(3, `Instância criada! Aguardando boot e join no cluster...`);
+
+        const clusterResult = await waitForMultipleNodesInCluster([{ targetId: nodeId, expectedNames }], 420000, onProgress, isCancelled);
+        if (clusterResult.cancelled) {
+            throw new Error(`Operação cancelada pelo usuário enquanto aguardava o nó ${nodeId}.`);
+        }
+        if (!clusterResult.allJoined) {
+            throw new Error(`A máquina virtual ${nodeId} foi criada na ${name}, mas o MicroK8s não concluiu o join dentro do tempo limite. Verifique os logs em /var/log/burst-init.log na instância.`);
+        }
+
+        const effectiveNodeName = clusterResult.readyNodes[0]?.nodeName || nodeName || nodeId;
+        await applyTenantIsolation(effectiveNodeName, tags.userId);
+
+        const singleNode = {
+            nodeId,
+            nodeName: effectiveNodeName,
+            provider: name,
+            credentials: cryptoService.encryptCredentials(resolvedCredentials)
+        };
+
+        return {
+            ...singleNode,
+            count: 1,
+            nodes: [singleNode]
+        };
+    } else {
+        // targetCount === 2
+        console.log(`[BURST] Modo 2 VMs ativado na nuvem ${name}.`);
+        if (onProgress) onProgress(2, `Gerando tokens do MicroK8s e criando 2 máquinas virtuais na ${name}...`);
+
+        const joinCommand1 = await generateJoinCommand();
+        const joinCommand2 = await generateJoinCommand();
+
+        const node1Name = `burst-node-${baseTs}-1`;
+        const node2Name = `burst-node-${baseTs}-2`;
+
+        console.log(`[BURST] Adicionando 2 nós (${node1Name}, ${node2Name}) na nuvem ${name}...${imageToPreload ? ` (Preload: ${imageToPreload})` : ''}`);
+
+        const [addResult1, addResult2] = await Promise.all([
+            module.addNode(joinCommand1, resolvedCredentials, {
+                onProgress,
+                tags,
+                onCreated,
+                imageToPreload,
+                nodeName: node1Name,
+                nodeId: node1Name,
+                skipEnsureInfra: name === 'AZURE'
+            }),
+            module.addNode(joinCommand2, resolvedCredentials, {
+                onProgress,
+                tags,
+                onCreated,
+                imageToPreload,
+                nodeName: node2Name,
+                nodeId: node2Name,
+                skipEnsureInfra: name === 'AZURE'
+            })
+        ]);
+
+        if (isCancelled && isCancelled()) {
+            throw new Error(`Operação cancelada antes do monitoramento das máquinas virtuais.`);
+        }
+
+        if (onProgress) onProgress(3, `2 instâncias criadas! Aguardando boot e join no cluster MicroK8s...`);
+
+        const targetsList = [
+            {
+                targetId: addResult1.nodeId || node1Name,
+                expectedNames: (addResult1 && Array.isArray(addResult1.expectedNames))
+                    ? addResult1.expectedNames
+                    : [addResult1.nodeId, addResult1.nodeName, node1Name].filter(Boolean)
+            },
+            {
+                targetId: addResult2.nodeId || node2Name,
+                expectedNames: (addResult2 && Array.isArray(addResult2.expectedNames))
+                    ? addResult2.expectedNames
+                    : [addResult2.nodeId, addResult2.nodeName, node2Name].filter(Boolean)
+            }
+        ];
+
+        const clusterResult = await waitForMultipleNodesInCluster(targetsList, 450000, onProgress, isCancelled);
+        if (clusterResult.cancelled) {
+            throw new Error(`Operação cancelada pelo usuário durante o monitoramento dos nós.`);
+        }
+        if (!clusterResult.allJoined) {
+            const missing = clusterResult.missingTargets ? clusterResult.missingTargets.join(', ') : 'nós';
+            throw new Error(`As máquinas foram criadas na ${name}, mas o join não concluiu a tempo para os nós: ${missing}.`);
+        }
+
+        for (const joinedNode of clusterResult.readyNodes) {
+            await applyTenantIsolation(joinedNode.nodeName, tags.userId);
+        }
+
+        const finalNodes = clusterResult.readyNodes.map(n => ({
+            nodeId: n.nodeId || n.nodeName,
+            nodeName: n.nodeName,
+            provider: name,
+            credentials: cryptoService.encryptCredentials(resolvedCredentials)
+        }));
+
+        return {
+            count: finalNodes.length,
+            nodes: finalNodes,
+            nodeId: finalNodes[0].nodeId,
+            nodeName: finalNodes[0].nodeName,
+            provider: name,
+            credentials: cryptoService.encryptCredentials(resolvedCredentials)
+        };
+    }
 }
 
 /**

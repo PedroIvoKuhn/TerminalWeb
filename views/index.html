@@ -291,6 +291,16 @@
                         </div>
 
                         <div class="form-group">
+                            <label for="aws-input-vm-count">Quantidade de Máquinas Virtuais (VMs)</label>
+                            <select id="aws-input-vm-count" class="cloud-input-field">
+                                <option value="1" selected>1 Máquina Virtual</option>
+                                <option value="2">2 Máquinas Virtuais</option>
+                            </select>
+                            <span class="field-help-text">&#128161; Escolha se deseja expandir o cluster com 1 ou 2
+                                instâncias simultâneas.</span>
+                        </div>
+
+                        <div class="form-group">
                             <label for="aws-input-access-key">AWS Access Key ID <span class="req">*</span></label>
                             <input type="text" id="aws-input-access-key" class="cloud-input-field"
                                 placeholder="Ex: AKIAIOSFODNN7EXAMPLE" spellcheck="false">
@@ -357,7 +367,7 @@
                             </div>
                         </div>
 
-                        <div class="form-row-3col">
+                        <div class="form-row-2col">
                             <div class="form-group">
                                 <label for="azure-input-location">Região da Azure</label>
                                 <select id="azure-input-location" class="cloud-input-field">
@@ -376,14 +386,22 @@
                                     <option value="Standard_B1s">Standard_B1s (1vCPU, 1GB) ($0.01/h)</option>
                                 </select>
                             </div>
+                        </div>
+
+                        <div class="form-row-2col">
+                            <div class="form-group">
+                                <label for="azure-input-vm-count">Quantidade de Máquinas Virtuais (VMs)</label>
+                                <select id="azure-input-vm-count" class="cloud-input-field">
+                                    <option value="1" selected>1 Máquina Virtual</option>
+                                    <option value="2">2 Máquinas Virtuais</option>
+                                </select>
+                            </div>
                             <div class="form-group">
                                 <label for="azure-input-rg">Grupo de Recursos</label>
                                 <input type="text" id="azure-input-rg" class="cloud-input-field" value="CloudBurstingRG"
                                     placeholder="CloudBurstingRG" spellcheck="false">
                             </div>
                         </div>
-                        <span class="field-help-text">&#128161; Lembre-se de adicionar a permissão <strong>Colaborador
-                                (Contributor)</strong> para este Aplicativo na sua Assinatura.</span>
                     </div>
 
                     <div id="burst-form-feedback" class="burst-form-alert" style="display: none;"></div>
@@ -475,7 +493,7 @@
     <script src="/xterm/lib/xterm.js"></script>
     <script src="/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
     <script src="/forge/forge.min.js"></script>
-    <script src="client.js"></script>
+    <script src="client.js?v=2.3"></script>
 </body>
 
 </html>

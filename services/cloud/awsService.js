@@ -300,7 +300,7 @@ async function addNode(joinCommand = '', credentials = {}, options = {}) {
     const amiId = await getLatestUbuntuAmi(client);
     console.log(`-> AMI encontrada: ${amiId}`);
 
-    const nodeName = `burst-node-${Date.now()}`;
+    const nodeName = options.nodeName || options.nodeId || `burst-node-${Date.now()}`;
     const userData = buildUserDataScript(joinCommand, credentials.tailscaleAuthKey, nodeName, imageToPreload);
 
     const instanceTags = [

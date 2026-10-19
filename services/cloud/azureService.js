@@ -306,6 +306,8 @@ date
     return Buffer.from(script).toString('base64');
 }
 
+const claimedIpNames = new Set();
+
 async function createOrReusePublicIp(ctx, nodeId) {
     const ipName = `${nodeId}-ip`;
     const targetLoc = ctx.location.toLowerCase().replace(/[\s_-]+/g, '');
@@ -314,7 +316,8 @@ async function createOrReusePublicIp(ctx, nodeId) {
     try {
         for await (const ip of ctx.networkClient.publicIPAddresses.list(ctx.resourceGroupName)) {
             const ipLoc = (ip.location || '').toLowerCase().replace(/[\s_-]+/g, '');
-            if (!ip.ipConfiguration && (!ipLoc || ipLoc === targetLoc)) {
+            if (!ip.ipConfiguration && (!ipLoc || ipLoc === targetLoc) && !claimedIpNames.has(ip.name)) {
+                claimedIpNames.add(ip.name);
                 console.log(`[BURST] Reaproveitando IP Público livre existente: ${ip.name} (será excluído ao encerrar a sessão)...`);
                 return ip;
             }
@@ -324,6 +327,7 @@ async function createOrReusePublicIp(ctx, nodeId) {
     }
 
     // 2. Se não houver, cria um novo IP Público dedicado sob demanda
+    claimedIpNames.add(ipName);
     console.log(`-> Criando novo IP Público dedicado: ${ipName} em ${ctx.location}...`);
     return await ctx.networkClient.publicIPAddresses.beginCreateOrUpdateAndWait(ctx.resourceGroupName, ipName, {
         location: ctx.location,
@@ -338,14 +342,16 @@ async function createOrReusePublicIp(ctx, nodeId) {
 }
 
 async function addNode(joinCommand = '', credentials = {}, options = {}) {
-    const { onProgress, tags = {}, onCreated, imageToPreload } = options;
+    const { onProgress, tags = {}, onCreated, imageToPreload, nodeName: customNodeName, nodeId: customNodeId, skipEnsureInfra } = options;
     const ctx = getAzureContext(credentials);
 
-    console.log("-> Garantindo infraestrutura básica (RG, VNet, Subnet) na Azure...");
-    if (onProgress) onProgress(2, "Garantindo infraestrutura básica (RG, VNet, Subnet) na Azure...");
-    await ensureInfrastructure(ctx);
+    if (!skipEnsureInfra) {
+        console.log("-> Garantindo infraestrutura básica (RG, VNet, Subnet) na Azure...");
+        if (onProgress) onProgress(2, "Garantindo infraestrutura básica (RG, VNet, Subnet) na Azure...");
+        await ensureInfrastructure(ctx);
+    }
 
-    const nodeId = `burst-node-${Date.now()}`;
+    const nodeId = customNodeId || customNodeName || `burst-node-${Date.now()}`;
     const nicName = `${nodeId}-nic`;
 
     // Cria ou aloca IP Público sob demanda
@@ -371,6 +377,7 @@ async function addNode(joinCommand = '', credentials = {}, options = {}) {
         });
     } catch (nicErr) {
         // Se a criação da NIC falhar, exclui o IP público para não gerar cobrança residual
+        claimedIpNames.delete(publicIp.name);
         try {
             await ctx.networkClient.publicIPAddresses.beginDeleteAndWait(ctx.resourceGroupName, publicIp.name);
         } catch (_) {}
@@ -496,8 +503,10 @@ async function removeNode(nodeId, credentials = {}) {
         if (!ipName) continue;
         try {
             await ctx.networkClient.publicIPAddresses.beginDeleteAndWait(ctx.resourceGroupName, ipName);
+            claimedIpNames.delete(ipName);
             console.log(`[BURST] IP Público ${ipName} excluído com sucesso (custo zerado).`);
         } catch (ipErr) {
+            claimedIpNames.delete(ipName);
             // Ignora se não existir
         }
     }
@@ -583,8 +592,15 @@ async function listBurstNodes(credentials = {}) {
     }
 }
 
+async function ensureInfrastructureForCredentials(credentials = {}) {
+    const ctx = getAzureContext(credentials);
+    await ensureInfrastructure(ctx);
+    return ctx;
+}
+
 module.exports = {
     validateCredentials,
+    ensureInfrastructure: ensureInfrastructureForCredentials,
     addNode,
     removeNode,
     listBurstNodes,
