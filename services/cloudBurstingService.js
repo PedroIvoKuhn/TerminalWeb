@@ -161,15 +161,15 @@ async function waitForNodeInCluster(nodePrefixOrNames, timeoutMs = 420000, onPro
                 const readyCondition = foundNode.status?.conditions?.find(c => c.type === 'Ready');
                 const isReady = readyCondition && readyCondition.status === 'True';
                 const internalIp = foundNode.status?.addresses?.find(a => a.type === 'InternalIP')?.address;
-                const vpnIpReady = sawInTailscale ? (internalIp && internalIp.startsWith('100.')) : true;
+                const vpnIpReady = Boolean(internalIp && internalIp.startsWith('100.'));
 
                 if (isReady && vpnIpReady) {
                     console.log(`[BURST] Nó ${name} está no cluster com IP da VPN (${internalIp}) e em estado Ready!`);
                     if (onProgress) onProgress(4, `Nó ${name} pronto e integrado ao cluster MicroK8s!`);
                     return { joined: true, ready: true, nodeName: name };
                 } else {
-                    console.log(`[BURST] Nó ${name} detectado no cluster (IP: ${internalIp || 'pendente'}). Aguardando kubelet ficar Ready e anunciar IP da VPN...`);
-                    if (onProgress) onProgress(4, `Nó ${name} detectado no cluster! Aguardando inicialização da rede/CNI...`);
+                    console.log(`[BURST] Nó ${name} detectado no cluster (IP atual: ${internalIp || 'pendente'}, Ready: ${isReady}). Aguardando anúncio do IP da VPN Tailscale (100.x.x.x)...`);
+                    if (onProgress) onProgress(4, `Nó ${name} detectado no cluster! Aguardando sincronização de rede VPN e kubelet...`);
 
                     // Se o calico-node falhou nos primeiros segundos por causa de inicialização assíncrona,
                     // reinicia o pod calico-node deste nó para que ele não fique esperando o tempo de backoff
@@ -308,11 +308,24 @@ async function listBurstNodes({ provider, credentials } = {}) {
     return await module.listBurstNodes(resolvedCredentials);
 }
 
+/**
+ * Limpa recursos órfãos na nuvem (como IPs públicos ou interfaces de rede ociosas)
+ */
+async function cleanupOrphanResources({ provider, credentials } = {}) {
+    const { name, module } = resolveProvider(provider);
+    if (typeof module.cleanupOrphanResources === 'function') {
+        const plainCredentials = cryptoService.decryptCredentials(credentials);
+        const resolvedCredentials = { ...getEnvCredentials(name), ...(plainCredentials || {}) };
+        return await module.cleanupOrphanResources(resolvedCredentials);
+    }
+}
+
 module.exports = {
     getEnvCredentials,
     validateCredentials,
     addNode,
     removeNode,
     listBurstNodes,
-    generateJoinCommand
+    generateJoinCommand,
+    cleanupOrphanResources
 };

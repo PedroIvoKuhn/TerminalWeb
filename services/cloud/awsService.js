@@ -159,7 +159,7 @@ if [ -n "$TS_IP" ]; then
     mkdir -p /var/snap/microk8s/current/args
     echo "--node-ip=$TS_IP" >> /var/snap/microk8s/current/args/kubelet
     ${nodeName ? `echo "--hostname-override=${nodeName}" >> /var/snap/microk8s/current/args/kubelet` : ''}
-    systemctl restart snap.microk8s.daemon-kubelet 2>/dev/null || true
+    systemctl restart snap.microk8s.daemon-kubelite 2>/dev/null || systemctl restart snap.microk8s.daemon-kubelet 2>/dev/null || snap restart microk8s
 fi
 
 mkdir -p /home/ubuntu/.kube
@@ -191,7 +191,7 @@ if [ -n "$TS_IP" ]; then
     sed -i '/--hostname-override=/d' /var/snap/microk8s/current/args/kubelet 2>/dev/null || true
     echo "--hostname-override=${nodeName}" >> /var/snap/microk8s/current/args/kubelet
     ` : ''}
-    systemctl restart snap.microk8s.daemon-kubelet 2>/dev/null || true
+    systemctl restart snap.microk8s.daemon-kubelite 2>/dev/null || systemctl restart snap.microk8s.daemon-kubelet 2>/dev/null || snap restart microk8s
 fi
 
 # --- Configuracao de DNAT e Watchdog para Kubernetes Service (${masterHost}) ---

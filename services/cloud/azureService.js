@@ -55,12 +55,43 @@ async function validateCredentials(credentials = {}) {
 
 async function ensureInfrastructure(ctx) {
     console.log("-> Registrando Providers da Azure (se necessário)...");
-    await ctx.resourceClient.providers.register('Microsoft.Network');
-    await ctx.resourceClient.providers.register('Microsoft.Compute');
+    try {
+        await ctx.resourceClient.providers.register('Microsoft.Network');
+        await ctx.resourceClient.providers.register('Microsoft.Compute');
+    } catch (pErr) {
+        console.warn(`[AZURE AVISO] Registro de providers: ${pErr.message}`);
+    }
 
-    await ctx.resourceClient.resourceGroups.createOrUpdate(ctx.resourceGroupName, {
-        location: ctx.location
-    });
+    // Se o Resource Group já existir, mantemos ele sem tentar alterar sua localização.
+    try {
+        const checkRes = await ctx.resourceClient.resourceGroups.checkExistence(ctx.resourceGroupName);
+        const rgExists = (checkRes && typeof checkRes.body === 'boolean') ? checkRes.body : !!checkRes;
+        if (!rgExists) {
+            console.log(`[AZURE] Criando Resource Group '${ctx.resourceGroupName}' em '${ctx.location}'...`);
+            await ctx.resourceClient.resourceGroups.createOrUpdate(ctx.resourceGroupName, {
+                location: ctx.location
+            });
+        } else {
+            console.log(`[AZURE] Resource Group '${ctx.resourceGroupName}' já existe. Utilizando para alocação de recursos em '${ctx.location}'...`);
+        }
+    } catch (rgErr) {
+        console.warn(`[AZURE AVISO] Erro ao checar Resource Group: ${rgErr.message}`);
+    }
+
+    // Garante que a VNet seja compatível com a região atual do burst
+    try {
+        const existingVnet = await ctx.networkClient.virtualNetworks.get(ctx.resourceGroupName, ctx.vnetName);
+        if (existingVnet && existingVnet.location) {
+            const vnetLoc = existingVnet.location.toLowerCase().replace(/[\s_-]+/g, '');
+            const targetLoc = ctx.location.toLowerCase().replace(/[\s_-]+/g, '');
+            if (vnetLoc !== targetLoc) {
+                // Se a BurstVNet padrão foi criada em outra região, usa uma VNet específica para a região
+                ctx.vnetName = `BurstVNet-${ctx.location}`;
+            }
+        }
+    } catch (_) {
+        // VNet ainda não existe
+    }
 
     await ctx.networkClient.virtualNetworks.beginCreateOrUpdateAndWait(ctx.resourceGroupName, ctx.vnetName, {
         location: ctx.location,
@@ -85,6 +116,13 @@ set -x
 echo "=== INICIANDO CONFIGURACAO DO BURST NODE ==="
 date
 
+${nodeName ? `
+# Garante hostname consistente
+hostnamectl set-hostname "${nodeName}" || true
+echo "${nodeName}" > /etc/hostname || true
+echo "127.0.0.1 ${nodeName}" >> /etc/hosts || true
+` : ''}
+
 # Garante curl instalado rapidamente sem update desnecessário se já existir
 if ! command -v curl >/dev/null 2>&1; then
     while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
@@ -100,7 +138,7 @@ curl -fsSL https://tailscale.com/install.sh | sh
 `;
 
     if (tailscaleKey) {
-        script += `tailscale up --authkey=${tailscaleKey} --accept-routes --ssh\n`;
+        script += `tailscale up --authkey=${tailscaleKey} ${nodeName ? `--hostname=${nodeName}` : ''} --accept-routes --ssh\n`;
         script += `
 # Aguarda IP do Tailscale ser configurado na interface
 TS_IP=""
@@ -136,6 +174,8 @@ if [ -n "$TS_IP" ]; then
     echo "Configurando --node-ip=$TS_IP no kubelet..."
     mkdir -p /var/snap/microk8s/current/args
     echo "--node-ip=$TS_IP" >> /var/snap/microk8s/current/args/kubelet
+    ${nodeName ? `echo "--hostname-override=${nodeName}" >> /var/snap/microk8s/current/args/kubelet` : ''}
+    systemctl restart snap.microk8s.daemon-kubelite 2>/dev/null || systemctl restart snap.microk8s.daemon-kubelet 2>/dev/null || snap restart microk8s
 fi
 
 mkdir -p /home/ubuntu/.kube
@@ -167,7 +207,7 @@ if [ -n "$TS_IP" ]; then
     sed -i '/--hostname-override=/d' /var/snap/microk8s/current/args/kubelet 2>/dev/null || true
     echo "--hostname-override=${nodeName}" >> /var/snap/microk8s/current/args/kubelet
     ` : ''}
-    systemctl restart snap.microk8s.daemon-kubelet 2>/dev/null || true
+    systemctl restart snap.microk8s.daemon-kubelite 2>/dev/null || systemctl restart snap.microk8s.daemon-kubelet 2>/dev/null || snap restart microk8s
 fi
 
 # --- Configuracao de DNAT e Watchdog para Kubernetes Service (${masterHost}) ---
@@ -266,53 +306,34 @@ date
     return Buffer.from(script).toString('base64');
 }
 
-async function getOrCreatePublicIp(ctx) {
-    console.log("-> Verificando IPs Públicos existentes na Azure para reutilização...");
-    const existingIps = [];
+async function createOrReusePublicIp(ctx, nodeId) {
+    const ipName = `${nodeId}-ip`;
+    const targetLoc = ctx.location.toLowerCase().replace(/[\s_-]+/g, '');
+
+    // 1. Se já houver algum IP livre no RG de uma execução anterior abortada, reaproveita para não estourar a cota
     try {
         for await (const ip of ctx.networkClient.publicIPAddresses.list(ctx.resourceGroupName)) {
-            existingIps.push(ip);
+            const ipLoc = (ip.location || '').toLowerCase().replace(/[\s_-]+/g, '');
+            if (!ip.ipConfiguration && (!ipLoc || ipLoc === targetLoc)) {
+                console.log(`[BURST] Reaproveitando IP Público livre existente: ${ip.name} (será excluído ao encerrar a sessão)...`);
+                return ip;
+            }
         }
     } catch (err) {
         console.warn(`[BURST AVISO] Erro ao listar IPs públicos: ${err.message}`);
     }
 
-    // 1. Procura um IP público que já esteja livre (sem interface de rede associada)
-    const freeIp = existingIps.find(ip => !ip.ipConfiguration);
-    if (freeIp) {
-        console.log(`[BURST] Reutilizando IP Público existente livre: ${freeIp.name} (${freeIp.ipAddress || 'alocado'})`);
-        return freeIp;
-    }
-
-    // 2. Se houver IPs associados a NICs órfãs (onde a VM não existe mais), limpa a NIC para liberar o IP
-    for (const ip of existingIps) {
-        if (ip.ipConfiguration && ip.ipConfiguration.id) {
-            const match = ip.ipConfiguration.id.match(/networkInterfaces\/([^\/]+)/);
-            if (match) {
-                const nicName = match[1];
-                try {
-                    const nic = await ctx.networkClient.networkInterfaces.get(ctx.resourceGroupName, nicName);
-                    if (!nic.virtualMachine) {
-                        console.log(`[BURST] Encontrada NIC órfã ${nicName} segurando o IP ${ip.name}. Excluindo NIC para liberar o IP...`);
-                        await ctx.networkClient.networkInterfaces.beginDeleteAndWait(ctx.resourceGroupName, nicName);
-                        console.log(`[BURST] IP Público ${ip.name} liberado com sucesso para reutilização!`);
-                        const updatedIp = await ctx.networkClient.publicIPAddresses.get(ctx.resourceGroupName, ip.name);
-                        return updatedIp;
-                    }
-                } catch (e) {
-                    console.warn(`[BURST AVISO] Não foi possível verificar/limpar NIC ${nicName}: ${e.message}`);
-                }
-            }
-        }
-    }
-
-    // 3. Se não houver nenhum IP livre no RG e a cota permitir, cria um novo
-    const poolIpName = `burst-pool-ip-${Date.now()}`;
-    console.log(`-> Criando novo IP Público no pool: ${poolIpName}...`);
-    return await ctx.networkClient.publicIPAddresses.beginCreateOrUpdateAndWait(ctx.resourceGroupName, poolIpName, {
+    // 2. Se não houver, cria um novo IP Público dedicado sob demanda
+    console.log(`-> Criando novo IP Público dedicado: ${ipName} em ${ctx.location}...`);
+    return await ctx.networkClient.publicIPAddresses.beginCreateOrUpdateAndWait(ctx.resourceGroupName, ipName, {
         location: ctx.location,
         publicIPAllocationMethod: 'Static',
-        sku: { name: 'Standard' }
+        sku: { name: 'Standard' },
+        tags: {
+            Role: "CloudBurstingWorker",
+            ManagedBy: "TerminalWeb",
+            NodeId: nodeId
+        }
     });
 }
 
@@ -327,25 +348,39 @@ async function addNode(joinCommand = '', credentials = {}, options = {}) {
     const nodeId = `burst-node-${Date.now()}`;
     const nicName = `${nodeId}-nic`;
 
-    // Reutiliza IP Público existente livre para não estourar a cota da região
-    const publicIp = await getOrCreatePublicIp(ctx);
+    // Cria ou aloca IP Público sob demanda
+    const publicIp = await createOrReusePublicIp(ctx, nodeId);
 
     console.log(`-> Criando Interface de Rede (NIC): ${nicName} com IP Público ${publicIp.name}...`);
     const subnet = await ctx.networkClient.subnets.get(ctx.resourceGroupName, ctx.vnetName, ctx.subnetName);
-    
-    const nic = await ctx.networkClient.networkInterfaces.beginCreateOrUpdateAndWait(ctx.resourceGroupName, nicName, {
-        location: ctx.location,
-        ipConfigurations: [{
-            name: 'ipconfig1',
-            subnet: { id: subnet.id },
-            publicIPAddress: { id: publicIp.id }
-        }]
-    });
+
+    let nic;
+    try {
+        nic = await ctx.networkClient.networkInterfaces.beginCreateOrUpdateAndWait(ctx.resourceGroupName, nicName, {
+            location: ctx.location,
+            ipConfigurations: [{
+                name: 'ipconfig1',
+                subnet: { id: subnet.id },
+                publicIPAddress: { id: publicIp.id }
+            }],
+            tags: {
+                Role: "CloudBurstingWorker",
+                ManagedBy: "TerminalWeb",
+                NodeId: nodeId
+            }
+        });
+    } catch (nicErr) {
+        // Se a criação da NIC falhar, exclui o IP público para não gerar cobrança residual
+        try {
+            await ctx.networkClient.publicIPAddresses.beginDeleteAndWait(ctx.resourceGroupName, publicIp.name);
+        } catch (_) {}
+        throw nicErr;
+    }
 
     const encodedUserData = buildUserDataScript(joinCommand, credentials.tailscaleAuthKey, nodeId, imageToPreload);
     console.log(`-> Criando Máquina Virtual: ${nodeId}...`);
     if (onProgress) onProgress(2, `Criando Máquina Virtual ${nodeId} na Azure...`);
-    
+
     const adminPassword = `Burst@${Math.random().toString(36).slice(2)}${Date.now()}!`;
 
     const vmTags = {
@@ -402,10 +437,16 @@ async function addNode(joinCommand = '', credentials = {}, options = {}) {
         };
     } catch (error) {
         console.error("[ERRO] Falha ao criar a instância no Azure:", error);
-        // Em caso de falha na criação da VM, limpa a NIC criada para não deixar resíduo
+        // Em caso de falha na criação da VM, limpa NIC, IP e Disco para não deixar nenhum recurso gerando custo
         try {
             await ctx.networkClient.networkInterfaces.beginDeleteAndWait(ctx.resourceGroupName, nicName);
-        } catch (_) {}
+        } catch (_) { }
+        try {
+            await ctx.networkClient.publicIPAddresses.beginDeleteAndWait(ctx.resourceGroupName, publicIp.name);
+        } catch (_) { }
+        try {
+            await ctx.computeClient.disks.beginDeleteAndWait(ctx.resourceGroupName, `${nodeId}-osdisk`);
+        } catch (_) { }
         throw error;
     }
 }
@@ -413,8 +454,19 @@ async function addNode(joinCommand = '', credentials = {}, options = {}) {
 async function removeNode(nodeId, credentials = {}) {
     const ctx = getAzureContext(credentials);
     console.log(`-> Solicitando encerramento da VM ${nodeId} e recursos associados no Azure...`);
-    
-    // 1. Exclui a VM
+
+    // 1. Descobre se há IP público associado à NIC antes de deletá-la
+    let associatedIpName = `${nodeId}-ip`;
+    try {
+        const nic = await ctx.networkClient.networkInterfaces.get(ctx.resourceGroupName, `${nodeId}-nic`);
+        if (nic.ipConfigurations && nic.ipConfigurations[0] && nic.ipConfigurations[0].publicIPAddress) {
+            const ipId = nic.ipConfigurations[0].publicIPAddress.id || '';
+            const match = ipId.match(/publicIPAddresses\/([^\/]+)/);
+            if (match) associatedIpName = match[1];
+        }
+    } catch (_) {}
+
+    // 2. Exclui a VM
     try {
         await ctx.computeClient.virtualMachines.beginDeleteAndWait(ctx.resourceGroupName, nodeId);
         console.log(`[BURST] VM ${nodeId} excluída.`);
@@ -422,15 +474,15 @@ async function removeNode(nodeId, credentials = {}) {
         console.warn(`[BURST AVISO] VM ${nodeId} já excluída ou inexistente: ${vmErr.message}`);
     }
 
-    // 2. Exclui a NIC (desassocia o IP público automaticamente, deixando-o livre no pool para o próximo nó)
+    // 3. Exclui a NIC
     try {
         await ctx.networkClient.networkInterfaces.beginDeleteAndWait(ctx.resourceGroupName, `${nodeId}-nic`);
-        console.log(`[BURST] Interface de rede ${nodeId}-nic excluída (IP público liberado para reutilização).`);
+        console.log(`[BURST] Interface de rede ${nodeId}-nic excluída.`);
     } catch (nicErr) {
         console.warn(`[BURST AVISO] NIC ${nodeId}-nic já excluída ou inexistente: ${nicErr.message}`);
     }
 
-    // 3. Exclui o disco OS
+    // 4. Exclui o disco OS
     try {
         await ctx.computeClient.disks.beginDeleteAndWait(ctx.resourceGroupName, `${nodeId}-osdisk`);
         console.log(`[BURST] Disco ${nodeId}-osdisk excluído.`);
@@ -438,8 +490,57 @@ async function removeNode(nodeId, credentials = {}) {
         console.warn(`[BURST AVISO] Disco ${nodeId}-osdisk já excluído ou inexistente: ${diskErr.message}`);
     }
 
-    console.log(`[SUCESSO] Instância ${nodeId} e seus recursos limpos do Azure.`);
+    // 5. Exclui o IP público para NÃO gerar cobrança de IP ocioso na Azure!
+    const ipsToDelete = new Set([associatedIpName, `${nodeId}-ip`]);
+    for (const ipName of ipsToDelete) {
+        if (!ipName) continue;
+        try {
+            await ctx.networkClient.publicIPAddresses.beginDeleteAndWait(ctx.resourceGroupName, ipName);
+            console.log(`[BURST] IP Público ${ipName} excluído com sucesso (custo zerado).`);
+        } catch (ipErr) {
+            // Ignora se não existir
+        }
+    }
+
+    console.log(`[SUCESSO] Instância ${nodeId} e seus recursos limpos do Azure (sem cobrança residual).`);
     return true;
+}
+
+/**
+ * Varre e exclui recursos órfãos (IPs públicos livres e NICs sem VM) para garantir custo zero
+ */
+async function cleanupOrphanResources(credentials = {}) {
+    try {
+        const ctx = getAzureContext(credentials);
+        console.log(`[BURST] Varrendo recursos órfãos (IPs e NICs ociosos) em '${ctx.resourceGroupName}'...`);
+
+        // 1. Exclui NICs órfãs (sem VM associada)
+        for await (const nic of ctx.networkClient.networkInterfaces.list(ctx.resourceGroupName)) {
+            if (nic.name && nic.name.startsWith('burst-node-') && !nic.virtualMachine) {
+                console.log(`[BURST] Excluindo NIC órfã: ${nic.name}...`);
+                try {
+                    await ctx.networkClient.networkInterfaces.beginDeleteAndWait(ctx.resourceGroupName, nic.name);
+                } catch (e) {
+                    console.warn(`[BURST AVISO] Falha ao excluir NIC órfã ${nic.name}: ${e.message}`);
+                }
+            }
+        }
+
+        // 2. Exclui IPs públicos órfãos/ociosos (sem ipConfiguration)
+        for await (const ip of ctx.networkClient.publicIPAddresses.list(ctx.resourceGroupName)) {
+            if (!ip.ipConfiguration) {
+                console.log(`[BURST] Excluindo IP Público ocioso para zerar custos: ${ip.name}...`);
+                try {
+                    await ctx.networkClient.publicIPAddresses.beginDeleteAndWait(ctx.resourceGroupName, ip.name);
+                    console.log(`[BURST] IP Público ocioso ${ip.name} excluído.`);
+                } catch (e) {
+                    console.warn(`[BURST AVISO] Falha ao excluir IP ocioso ${ip.name}: ${e.message}`);
+                }
+            }
+        }
+    } catch (err) {
+        console.warn(`[BURST AVISO] Limpeza de recursos órfãos na Azure ignorada ou falhou: ${err.message}`);
+    }
 }
 
 async function listBurstNodes(credentials = {}) {
@@ -447,7 +548,7 @@ async function listBurstNodes(credentials = {}) {
     try {
         const instances = [];
         const vms = ctx.computeClient.virtualMachines.list(ctx.resourceGroupName);
-        
+
         for await (const vm of vms) {
             if (vm.tags && vm.tags.Role === 'CloudBurstingWorker') {
                 const vmDetails = await ctx.computeClient.virtualMachines.instanceView(ctx.resourceGroupName, vm.name);
@@ -486,5 +587,6 @@ module.exports = {
     validateCredentials,
     addNode,
     removeNode,
-    listBurstNodes
+    listBurstNodes,
+    cleanupOrphanResources
 };

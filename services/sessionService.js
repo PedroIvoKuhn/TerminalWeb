@@ -317,6 +317,14 @@ async function cleanupOrphanBurstNodes() {
           }
         }
       }
+      // 5. Limpeza de recursos órfãos na nuvem (IPs públicos livres / NICs ociosas) para garantir custo zero
+      try {
+        if (process.env.AZURE_SUBSCRIPTION_ID) {
+          await cloudBurstingService.cleanupOrphanResources({ provider: 'AZURE' });
+        }
+      } catch (orphanResErr) {
+        // Ignora caso credenciais não estejam no .env
+      }
     } catch (cloudErr) {
       console.warn(`[SYNC AVISO] Falha ao verificar nós órfãos na nuvem:`, cloudErr.message);
     }

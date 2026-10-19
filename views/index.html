@@ -64,7 +64,8 @@
         <!-- Alerta Dinâmico de Congestionamento do Cluster Local -->
         <div id="cluster-congestion-toast" class="cluster-congestion-card" style="display: none;">
             <div class="congestion-header">
-                <span class="congestion-title">⚠️ Cluster com Alta Demanda (<span id="congestion-load-val"></span> de uso)</span>
+                <span class="congestion-title">⚠️ Cluster com Alta Demanda (<span id="congestion-load-val"></span> de
+                    uso)</span>
                 <button type="button" id="btn-close-congestion-toast" class="btn-congestion-close"
                     title="Dispensar aviso">✕</button>
             </div>
@@ -272,8 +273,8 @@
                             <div class="form-group">
                                 <label for="aws-input-region">Região AWS <span class="req">*</span></label>
                                 <select id="aws-input-region" class="cloud-input-field">
-                                    <option value="sa-east-1">sa-east-1 (São Paulo - Menor Latência)</option>
-                                    <option value="us-east-1">us-east-1 (N. Virginia - Padrão Free Tier)</option>
+                                    <option value="sa-east-1">sa-east-1 (São Paulo)</option>
+                                    <option value="us-east-1">us-east-1 (N. Virginia)</option>
                                     <option value="us-east-2">us-east-2 (Ohio)</option>
                                     <option value="us-west-2">us-west-2 (Oregon)</option>
                                 </select>
@@ -281,10 +282,10 @@
                             <div class="form-group">
                                 <label for="aws-input-instance-type">Tipo de Instância</label>
                                 <select id="aws-input-instance-type" class="cloud-input-field">
-                                    <option value="t3.micro">t3.micro (2 vCPU, 1 GB RAM - Free Tier)</option>
-                                    <option value="t2.micro">t2.micro (1 vCPU, 1 GB RAM - Free Tier)</option>
-                                    <option value="t3.small">t3.small (2 vCPU, 2 GB RAM)</option>
-                                    <option value="t3.medium">t3.medium (2 vCPU, 4 GB RAM)</option>
+                                    <option value="t3.micro">t3.micro (2vCPU, 1GB) ($0.01/h)</option>
+                                    <option value="t2.micro">t2.micro (1vCPU, 1GB) ($0.01/h)</option>
+                                    <option value="t3.small">t3.small (2vCPU, 2GB) ($0.02/h)</option>
+                                    <option value="t3.medium">t3.medium (2vCPU, 4GB) ($0.04/h)</option>
                                 </select>
                             </div>
                         </div>
@@ -370,9 +371,9 @@
                             <div class="form-group">
                                 <label for="azure-input-vm-size">Tamanho da VM</label>
                                 <select id="azure-input-vm-size" class="cloud-input-field">
-                                    <option value="Standard_B2ats_v2">Standard_B2ats_v2 (2 vCPU, 2 GB)</option>
-                                    <option value="Standard_B2s">Standard_B2s (2 vCPU, 4 GB)</option>
-                                    <option value="Standard_B1s">Standard_B1s (1 vCPU, 1 GB)</option>
+                                    <option value="Standard_B2ats_v2">Standard_B2ats_v2 (2vCPU, 2GB) ($0.02/h)</option>
+                                    <option value="Standard_B2s">Standard_B2s (2vCPU, 4GB) ($0.04/h)</option>
+                                    <option value="Standard_B1s">Standard_B1s (1vCPU, 1GB) ($0.01/h)</option>
                                 </select>
                             </div>
                             <div class="form-group">

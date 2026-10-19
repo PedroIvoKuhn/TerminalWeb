@@ -252,6 +252,13 @@ async function handlePodError(err, socket, jobId, secretName) {
     console.error('Erro no ciclo de vida do Pod:', err);
     socket.emit('output', `\r\n[ERRO DO BACKEND]: ${err.message}\r\nIniciando limpeza...`);
     await k8sService.cleanupJob(jobId, secretName);
+    if (jobId) {
+        try {
+            await sessionService.terminateSession(jobId);
+        } catch (termErr) {
+            console.warn(`[BURST AVISO] Falha ao encerrar sessão ${jobId} pós-erro:`, termErr.message);
+        }
+    }
 }
 
 async function handleSessionBurst(socket, data = {}) {
