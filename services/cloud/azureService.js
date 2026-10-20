@@ -230,6 +230,20 @@ apply_rules() {
             $ipt -t nat -I PREROUTING 1 -d 10.152.183.1 -p tcp --dport 443 -j DNAT --to-destination $MASTER_HOST:16443 2>/dev/null || true
         fi
 
+        # 2b. Garante que a regra de DNAT para o CoreDNS (ClusterIP 10.152.183.10:53) aponte para o DNS forwarder do Master via Tailscale (porta 5353)
+        if ! $ipt -t nat -C OUTPUT -d 10.152.183.10 -p udp --dport 53 -j DNAT --to-destination $MASTER_HOST:5353 2>/dev/null; then
+            $ipt -t nat -I OUTPUT 1 -d 10.152.183.10 -p udp --dport 53 -j DNAT --to-destination $MASTER_HOST:5353 2>/dev/null || true
+        fi
+        if ! $ipt -t nat -C PREROUTING -d 10.152.183.10 -p udp --dport 53 -j DNAT --to-destination $MASTER_HOST:5353 2>/dev/null; then
+            $ipt -t nat -I PREROUTING 1 -d 10.152.183.10 -p udp --dport 53 -j DNAT --to-destination $MASTER_HOST:5353 2>/dev/null || true
+        fi
+        if ! $ipt -t nat -C OUTPUT -d 10.152.183.10 -p tcp --dport 53 -j DNAT --to-destination $MASTER_HOST:5353 2>/dev/null; then
+            $ipt -t nat -I OUTPUT 1 -d 10.152.183.10 -p tcp --dport 53 -j DNAT --to-destination $MASTER_HOST:5353 2>/dev/null || true
+        fi
+        if ! $ipt -t nat -C PREROUTING -d 10.152.183.10 -p tcp --dport 53 -j DNAT --to-destination $MASTER_HOST:5353 2>/dev/null; then
+            $ipt -t nat -I PREROUTING 1 -d 10.152.183.10 -p tcp --dport 53 -j DNAT --to-destination $MASTER_HOST:5353 2>/dev/null || true
+        fi
+
         # 3. Garante DNAT da faixa privada para evitar timeout caso kube-proxy direcione para outros masters
         if ! $ipt -t nat -C OUTPUT -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination $MASTER_HOST:16443 2>/dev/null; then
             $ipt -t nat -A OUTPUT -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination $MASTER_HOST:16443 2>/dev/null || true
@@ -269,11 +283,13 @@ echo "[HEARTBEAT] Iniciando monitoramento de conectividade com o master em $MAST
 
 while true; do
     # Testa se a API do MicroK8s no Master responde via Tailscale VPN
-    if curl -k -f -s --connect-timeout 5 --max-time 10 "https://\${MASTER_HOST}:16443/healthz" >/dev/null 2>&1; then
+    # MicroK8s retorna HTTP 401 para requisições anônimas em /healthz, indicando que o master está 100% vivo e respondendo
+    HTTP_CODE=\$(curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 "https://\${MASTER_HOST}:16443/healthz" 2>/dev/null || echo "000")
+    if [ "\$HTTP_CODE" = "200" ] || [ "\$HTTP_CODE" = "401" ] || [ "\$HTTP_CODE" = "403" ]; then
         FAIL_COUNT=0
     else
         FAIL_COUNT=\$((FAIL_COUNT + 1))
-        echo "[HEARTBEAT] Falha de conexao com o backend (\$FAIL_COUNT/\$MAX_FAILURES) em \$(date)"
+        echo "[HEARTBEAT] Falha de conexao com o backend (\$FAIL_COUNT/\$MAX_FAILURES, HTTP \$HTTP_CODE) em \$(date)"
         
         if [ "\$FAIL_COUNT" -ge "\$MAX_FAILURES" ]; then
             echo "[HEARTBEAT CRITICO] Master inacessivel por \$MAX_FAILURES minutos consecutivos. Iniciando auto-terminacao..."
@@ -294,6 +310,10 @@ nohup /usr/local/bin/burst-heartbeat-watchdog.sh >/var/log/burst-heartbeat.log 2
 for ipt in iptables-legacy iptables; do
     $ipt -t nat -I OUTPUT 1 -d 10.152.183.1 -p tcp --dport 443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
     $ipt -t nat -I PREROUTING 1 -d 10.152.183.1 -p tcp --dport 443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
+    $ipt -t nat -I OUTPUT 1 -d 10.152.183.10 -p udp --dport 53 -j DNAT --to-destination ${masterHost}:5353 2>/dev/null || true
+    $ipt -t nat -I PREROUTING 1 -d 10.152.183.10 -p udp --dport 53 -j DNAT --to-destination ${masterHost}:5353 2>/dev/null || true
+    $ipt -t nat -I OUTPUT 1 -d 10.152.183.10 -p tcp --dport 53 -j DNAT --to-destination ${masterHost}:5353 2>/dev/null || true
+    $ipt -t nat -I PREROUTING 1 -d 10.152.183.10 -p tcp --dport 53 -j DNAT --to-destination ${masterHost}:5353 2>/dev/null || true
     $ipt -t nat -A OUTPUT -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
     $ipt -t nat -A PREROUTING -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
     $ipt -t nat -A POSTROUTING -o tailscale0 -j MASQUERADE 2>/dev/null || true

@@ -17,30 +17,73 @@ const WARNING_BEFORE = 20 * 60 * 1000;        // 20 Minutos antes de acabar
 // Armazena os timers ativos: { jobId: { killTimer, warnTimer, expiresAt, burstNodes } }
 const activeSessions = {};
 
-// Armazena nós de burst provisionados antes de iniciar a sessão (indexados por socket.id)
+// Armazena nós de burst provisionados antes de iniciar a sessão (indexados por userId ou socket.id)
 const pendingBursts = {};
+const pendingTimers = {};
+const socketToOwner = {};
 
-function registerPendingBurst(socketId, burstInfo) {
-    if (!pendingBursts[socketId]) {
-        pendingBursts[socketId] = [];
+function registerPendingBurst(ownerKey, burstInfo, socketId) {
+    if (pendingTimers[ownerKey]) {
+        clearTimeout(pendingTimers[ownerKey]);
+        delete pendingTimers[ownerKey];
     }
-    const idx = pendingBursts[socketId].findIndex(b => b.nodeId === burstInfo.nodeId);
+    if (socketId) {
+        socketToOwner[socketId] = ownerKey;
+    }
+    if (!pendingBursts[ownerKey]) {
+        pendingBursts[ownerKey] = [];
+    }
+    const idx = pendingBursts[ownerKey].findIndex(b => b.nodeId === burstInfo.nodeId);
     if (idx >= 0) {
-        pendingBursts[socketId][idx] = { ...pendingBursts[socketId][idx], ...burstInfo };
+        pendingBursts[ownerKey][idx] = { ...pendingBursts[ownerKey][idx], ...burstInfo };
     } else {
-        pendingBursts[socketId].push(burstInfo);
+        pendingBursts[ownerKey].push(burstInfo);
     }
 }
 
-function getPendingBursts(socketId) {
-    return pendingBursts[socketId] || [];
+function getPendingBursts(ownerKeyOrSocketId) {
+    const ownerKey = socketToOwner[ownerKeyOrSocketId] || ownerKeyOrSocketId;
+    return pendingBursts[ownerKey] || pendingBursts[ownerKeyOrSocketId] || [];
 }
 
-async function cleanupPendingBurst(socketId) {
-    const bursts = pendingBursts[socketId];
+function reclaimPendingBurst(socket) {
+    const ownerKey = socket.data?.userId || socket.id;
+    if (pendingTimers[ownerKey]) {
+        console.log(`[BURST] Socket ${socket.id} reconectou para usuário '${ownerKey}'. Cancelando timer de limpeza de nós pendentes.`);
+        clearTimeout(pendingTimers[ownerKey]);
+        delete pendingTimers[ownerKey];
+    }
+    socketToOwner[socket.id] = ownerKey;
+    return pendingBursts[ownerKey] || [];
+}
+
+function schedulePendingBurstCleanup(socket, graceMs = 60000) {
+    const ownerKey = socketToOwner[socket.id] || socket.data?.userId || socket.id;
+    delete socketToOwner[socket.id];
+    const bursts = pendingBursts[ownerKey];
+    if (!bursts || bursts.length === 0) return;
+
+    if (pendingTimers[ownerKey]) {
+        clearTimeout(pendingTimers[ownerKey]);
+    }
+    console.log(`[BURST] Socket ${socket.id} desconectou. Carência de ${Math.round(graceMs / 1000)}s antes de limpar ${bursts.length} nó(s) pendente(s) do usuário '${ownerKey}'...`);
+    pendingTimers[ownerKey] = setTimeout(async () => {
+        delete pendingTimers[ownerKey];
+        await cleanupPendingBurst(ownerKey);
+    }, graceMs);
+}
+
+async function cleanupPendingBurst(ownerKeyOrSocketId) {
+    const ownerKey = socketToOwner[ownerKeyOrSocketId] || ownerKeyOrSocketId;
+    if (pendingTimers[ownerKey]) {
+        clearTimeout(pendingTimers[ownerKey]);
+        delete pendingTimers[ownerKey];
+    }
+    const bursts = pendingBursts[ownerKey];
     if (bursts && bursts.length > 0) {
-        console.log(`[BURST] Limpando ${bursts.length} nó(s) de burst pendente(s) para socket ${socketId}...`);
-        delete pendingBursts[socketId];
+        console.log(`[BURST] Carência expirou ou cancelamento: limpando ${bursts.length} nó(s) de burst pendente(s) para '${ownerKey}'...`);
+        delete pendingBursts[ownerKey];
+        delete pendingBursts[ownerKeyOrSocketId];
         for (const burst of bursts) {
             try {
                 await cloudBurstingService.removeNode(burst);
@@ -65,9 +108,17 @@ function startSession(jobId, socket, numMachines, userId, backupName) {
     
     console.log(`[SESSION] Iniciando monitoramento para ${jobId}. Expira em: ${new Date(expiresAt).toLocaleTimeString()}`);
 
+    const ownerKey = socketToOwner[socket.id] || userId || socket.id;
+    if (pendingTimers[ownerKey]) {
+        clearTimeout(pendingTimers[ownerKey]);
+        delete pendingTimers[ownerKey];
+    }
+
     // Vincula quaisquer nós de burst provisionados antes da inicialização do terminal
-    const sessionBurstNodes = pendingBursts[socket.id] || [];
+    const sessionBurstNodes = pendingBursts[ownerKey] || pendingBursts[socket.id] || [];
+    delete pendingBursts[ownerKey];
     delete pendingBursts[socket.id];
+    delete socketToOwner[socket.id];
 
     // Salva os dados da sessão
     activeSessions[jobId] = {
@@ -287,6 +338,15 @@ async function cleanupOrphanBurstNodes() {
                             Boolean(n.metadata?.labels?.['tenant']);
 
         if (isBurstNode && !activeNodeNames.has(lowerName)) {
+          // Se o nó foi criado há menos de 5 minutos, concede uma carência
+          // para não ejetar nó recém-criado em caso de reinício do nodemon ou reload de página
+          const creationTime = n.metadata?.creationTimestamp ? new Date(n.metadata.creationTimestamp).getTime() : 0;
+          const nodeAgeMs = Date.now() - creationTime;
+          if (creationTime > 0 && nodeAgeMs < 5 * 60 * 1000) {
+            console.log(`[SYNC] Nó recente ${nodeName} (${Math.round(nodeAgeMs / 1000)}s de vida) preservado na janela de carência.`);
+            continue;
+          }
+
           console.log(`[SYNC] Encontrado nó órfão no Kubernetes: ${nodeName}. Ejetando do cluster...`);
           try {
             await execAsync(`microk8s kubectl delete node ${nodeName}`);
@@ -300,38 +360,42 @@ async function cleanupOrphanBurstNodes() {
       console.warn(`[SYNC AVISO] Falha ao consultar nós do Kubernetes:`, k8sErr.message);
     }
 
-    // 4. Limpeza de instâncias órfãs remanescentes na Nuvem (AWS / Azure)
-    try {
-      const provider = (process.env.CLOUD_PROVIDER || 'AWS').toUpperCase();
-      const burstNodes = await cloudBurstingService.listBurstNodes({ provider });
-
-      for (const node of burstNodes) {
-        const nodeJobId = node.jobId || node.tags?.JobId;
-        if (!nodeJobId || String(nodeJobId).startsWith('pending-') || !activeJobIds.has(nodeJobId)) {
-          const targetId = node.id || node.name;
-          console.log(`[SYNC] Encontrado nó órfão ${targetId} (${nodeJobId}) na nuvem. Removendo...`);
-          try {
-            await cloudBurstingService.removeNode({
-              nodeId: targetId,
-              nodeName: targetId,
-              provider
-            });
-          } catch (err) {
-            console.warn(`[SYNC AVISO] Erro ao remover nó órfão ${targetId} da nuvem:`, err.message);
+    // 4. Limpeza de instâncias órfãs remanescentes na Nuvem (Azure e AWS)
+    const cloudProviders = ['AZURE', 'AWS'];
+    for (const provider of cloudProviders) {
+      try {
+        const burstNodes = await cloudBurstingService.listBurstNodes({ provider });
+        for (const node of burstNodes) {
+          const nodeJobId = node.jobId || node.tags?.JobId;
+          if (!nodeJobId || String(nodeJobId).startsWith('pending-') || !activeJobIds.has(nodeJobId)) {
+            const targetId = node.id || node.name;
+            console.log(`[SYNC] Encontrado nó órfão ${targetId} (${nodeJobId}) na nuvem ${provider}. Removendo...`);
+            try {
+              await cloudBurstingService.removeNode({
+                nodeId: targetId,
+                nodeName: targetId,
+                provider
+              });
+            } catch (err) {
+              console.warn(`[SYNC AVISO] Erro ao remover nó órfão ${targetId} da nuvem ${provider}:`, err.message);
+            }
           }
         }
+      } catch (_) {
+        // Silenciosamente ignora provedores que não possuem credenciais configuradas no momento
       }
-      // 5. Limpeza de recursos órfãos na nuvem (IPs públicos livres / NICs ociosas) para garantir custo zero
-      try {
-        if (process.env.AZURE_SUBSCRIPTION_ID) {
-          await cloudBurstingService.cleanupOrphanResources({ provider: 'AZURE' });
-        }
-      } catch (orphanResErr) {
-        // Ignora caso credenciais não estejam no .env
-      }
-    } catch (cloudErr) {
-      console.warn(`[SYNC AVISO] Falha ao verificar nós órfãos na nuvem:`, cloudErr.message);
     }
+
+    // 5. Limpeza de recursos órfãos na nuvem (IPs públicos livres / NICs ociosas) para garantir custo zero
+    try {
+      if (process.env.AZURE_SUBSCRIPTION_ID) {
+        await cloudBurstingService.cleanupOrphanResources({ provider: 'AZURE' });
+      }
+    } catch (orphanResErr) {
+      // Ignora caso credenciais não estejam no .env
+    }
+  } catch (outerErr) {
+    console.warn(`[SYNC AVISO] Falha durante sincronização de órfãos:`, outerErr.message);
   } finally {
     isCleaningUpOrphans = false;
   }
@@ -368,6 +432,8 @@ module.exports = {
     removeSocket,
     registerPendingBurst,
     getPendingBursts,
+    reclaimPendingBurst,
+    schedulePendingBurstCleanup,
     cleanupPendingBurst,
     registerBurstNode,
     hasBurstNodes,

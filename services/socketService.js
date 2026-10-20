@@ -26,6 +26,12 @@ module.exports = (io) => {
         socket.data.userId = userId;
         socket.data.activeBackupName = null;
 
+        // Se houver nós pendentes para este usuário (ex: após recarregar página/F5), recupera-os imediatamente
+        const existingPending = sessionService.reclaimPendingBurst(socket);
+        if (existingPending && existingPending.length > 0) {
+            socket.data.hasBurstNode = true;
+        }
+
         // Envia métricas do cluster imediatamente na conexão para aviso de pré-sessão
         clusterMonitorService.getClusterMetrics().then(metrics => {
             if (!socket.disconnected) {
@@ -62,6 +68,7 @@ module.exports = (io) => {
                 socket.emit('session:update', { expiresAt: expiresAt });
 
                 const hasDedicatedNode = sessionService.hasBurstNodes(jobId);
+                const burstNodes = sessionService.getBurstNodes(jobId);
 
                 // Criar a infraestrutura
                 const clusterInfo = {
@@ -76,6 +83,7 @@ module.exports = (io) => {
                     userId: currentUserId,
                     activeBackupName: backupName,
                     hasDedicatedNode,
+                    burstNodes,
                 };
                 const { masterPodName } = await k8sService.createClusterResources(clusterInfo);
                 socket.emit('output', `Pods criados. Aguardando o nó mestre ficar pronto...\r\n`);
@@ -227,6 +235,22 @@ module.exports = (io) => {
             socket.emit('burst:info', { provider });
         });
 
+        socket.on('burst:check-status', () => {
+            const pending = sessionService.reclaimPendingBurst(socket);
+            if (pending && pending.length > 0) {
+                const primary = pending[0];
+                socket.data.hasBurstNode = true;
+                socket.emit('burst:status', {
+                    connected: true,
+                    count: pending.length,
+                    nodes: pending,
+                    provider: primary.provider
+                });
+            } else {
+                socket.emit('burst:status', { connected: false });
+            }
+        });
+
         socket.on('burst:start', async (data) => {
             await handleSessionBurst(socket, data);
         });
@@ -248,8 +272,8 @@ module.exports = (io) => {
             if (jobId) {
                 sessionService.removeSocket(jobId, socket);
             } else {
-                // Limpa quaisquer nós de burst se o usuário fechar a página antes de iniciar o terminal
-                await sessionService.cleanupPendingBurst(socket.id);
+                // Concede 60s de carência para permitir recarga de página (F5) sem destruir o nó recém-provisionado
+                sessionService.schedulePendingBurstCleanup(socket, 60000);
             }
         });
     });
@@ -390,14 +414,15 @@ async function handleSessionBurst(socket, data = {}) {
             return;
         }
 
+        const ownerKey = socket.data.userId || socket.id;
         const finalNodes = (result && result.nodes) ? result.nodes : [result];
         for (const node of finalNodes) {
             // Se o usuário já tiver uma sessão ativa vincula ao JobId
             if (socket.data.jobId) {
                 sessionService.registerBurstNode(socket.data.jobId, node);
             } else {
-                // Caso contrário, atualiza como pendente com nodeName oficial
-                sessionService.registerPendingBurst(socket.id, node);
+                // Caso contrário, atualiza como pendente com nodeName oficial vinculado ao ownerKey
+                sessionService.registerPendingBurst(ownerKey, node, socket.id);
             }
         }
 
@@ -416,7 +441,7 @@ async function handleSessionBurst(socket, data = {}) {
         // Se qualquer máquina chegou a ser criada na nuvem mas a operação falhou depois (ou socket fechou), limpa imediatamente!
         if (pendingBurstInfos.length > 0) {
             console.log(`[BURST] Destruindo ${pendingBurstInfos.length} máquina(s) pendente(s) devido a erro/cancelamento no socket ${socket.id}...`);
-            await sessionService.cleanupPendingBurst(socket.id);
+            await sessionService.cleanupPendingBurst(socket.data.userId || socket.id);
         }
 
         if (!socket.disconnected) {

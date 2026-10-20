@@ -1,5 +1,37 @@
 const k8s = require('@kubernetes/client-node');
+const os = require('os');
 const { k8sApi, k8sNetworkingApi, namespace, kc, k8sExec } = require('../config/kubernetes');
+
+// Gerenciamento de portas hostPort para comunicação segura entre nós via Tailscale
+const activeHostPorts = new Map();
+
+function allocatePorts(jobId, count) {
+    const ports = [];
+    let candidate = 22100;
+    while (ports.length < count && candidate < 30000) {
+        let inUse = false;
+        for (const list of activeHostPorts.values()) {
+            if (list.includes(candidate)) { inUse = true; break; }
+        }
+        if (!inUse) ports.push(candidate);
+        candidate++;
+    }
+    activeHostPorts.set(jobId, ports);
+    return ports;
+}
+
+function releasePorts(jobId) {
+    activeHostPorts.delete(jobId);
+}
+
+function getLocalTailscaleIp() {
+    const interfaces = os.networkInterfaces();
+    if (interfaces['tailscale0']) {
+        const ip = interfaces['tailscale0'].find(i => i.family === 'IPv4' || i.family === 4)?.address;
+        if (ip) return ip;
+    }
+    return '100.90.80.70';
+}
 
 // --  Funções privadas
 
@@ -18,13 +50,14 @@ function getSecretManifest(secretName, privateKey, publicKey, sshConfig) {
     };
 }
 
-function generateSshConfig(numMachines, jobId, masterPodName, serviceName) {
+function generateSshConfig(machineTargets) {
     let sshConfig = '';
-    for (let i = 0; i < numMachines; i++) {
-        const isMaster = i === 0;
-        const alias = isMaster ? 'master' : `worker-${i}`;
-        const fqdn = `${alias}.${serviceName}.${namespace}.svc.cluster.local`;
-        sshConfig += `Host ${alias}\n    HostName ${fqdn}\n    User aluno\n\n`;
+    for (const target of machineTargets) {
+        sshConfig += `Host ${target.alias} ${target.fqdn}\n    HostName ${target.host}\n`;
+        if (target.port && target.port !== 22) {
+            sshConfig += `    Port ${target.port}\n`;
+        }
+        sshConfig += `    User aluno\n\n`;
     }
     sshConfig += `Host *\n    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null\n`;
     return sshConfig;
@@ -128,11 +161,46 @@ async function getJobPodsStatus(jobId) {
 }
 
 async function createClusterResources(clusterInfo) {
-    const { jobId, image, keys, expiresAt, numMachines, numCloud, numLocal, isHybrid, userId, activeBackupName, hasDedicatedNode } = clusterInfo;
+    const { jobId, image, keys, expiresAt, numMachines, numCloud, numLocal, isHybrid, userId, activeBackupName, hasDedicatedNode, burstNodes } = clusterInfo;
     const masterPodName = `master-${jobId}`;
     const serviceName = `svc-${jobId}`;
     const secretName = `ssh-keys-${jobId}`;
     const netpolName = `netpol-${jobId}`;
+
+    const tenantTag = userId ? `user-${String(userId).toLowerCase().replace(/[^a-z0-9-_]/g, '-').slice(0, 63)}` : null;
+
+    // Determina o particionamento do Cluster Híbrido:
+    const hybridActive = Boolean(isHybrid && hasDedicatedNode && tenantTag && typeof numLocal === 'number' && typeof numCloud === 'number');
+    const localPodsCount = hybridActive ? numLocal : (hasDedicatedNode ? 0 : numMachines);
+
+    const burstNodeList = Array.isArray(burstNodes) ? burstNodes : [];
+    const localTsIp = getLocalTailscaleIp();
+    const allocatedPorts = hasDedicatedNode ? allocatePorts(jobId, numMachines) : [];
+
+    // Mapeia os endpoints (host e porta) de cada pod para garantir comunicação perfeita
+    const machineTargets = [];
+    for (let i = 0; i < numMachines; i++) {
+        const isMaster = i === 0;
+        const alias = isMaster ? 'master' : `worker-${i}`;
+        const fqdn = `${alias}.${serviceName}.${namespace}.svc.cluster.local`;
+        const isCloudPod = hybridActive ? (i >= localPodsCount) : (hasDedicatedNode && Boolean(tenantTag));
+
+        let host = fqdn;
+        let port = 22;
+
+        if (hasDedicatedNode) {
+            port = allocatedPorts[i] || (22100 + i);
+            if (isCloudPod) {
+                const cloudIdx = hybridActive ? (i - localPodsCount) : i;
+                const assignedBurst = burstNodeList[cloudIdx % (burstNodeList.length || 1)];
+                host = assignedBurst?.internalIp || localTsIp;
+            } else {
+                host = localTsIp;
+            }
+        }
+
+        machineTargets.push({ alias, fqdn, host, port, isCloudPod });
+    }
 
     try {
         // Tenta deletar os recursos se já existirem (ignora erro se não existir)
@@ -144,8 +212,8 @@ async function createClusterResources(clusterInfo) {
         if (e.body && e.body.code !== 404) console.log("Aviso de limpeza prévia:", e.body ? e.body.message : e.message);
     }
 
-    // Cria o secret
-    const sshConfig = generateSshConfig(numMachines, jobId, masterPodName, serviceName);
+    // Cria o secret com configuração SSH adaptativa (suporta local, nuvem e híbrido via Tailscale)
+    const sshConfig = generateSshConfig(machineTargets);
     const secretManifest = getSecretManifest(secretName, keys.privateKey, keys.publicKey, sshConfig);
     await k8sApi.createNamespacedSecret(namespace, secretManifest);
 
@@ -158,7 +226,7 @@ async function createClusterResources(clusterInfo) {
     };
     await k8sApi.createNamespacedService(namespace, serviceManifest);
 
-    // Cria a NetworkPolicy para isolamento de rede (faz com que pods de outros usuários não enxerguem estes pods)
+    // Cria a NetworkPolicy para isolamento de rede permitindo tráfego SSH entre pods autorizados
     const netpolManifest = {
         apiVersion: 'networking.k8s.io/v1',
         kind: 'NetworkPolicy',
@@ -180,6 +248,11 @@ async function createClusterResources(clusterInfo) {
                             }
                         }
                     ]
+                },
+                {
+                    ports: [
+                        { protocol: 'TCP', port: 22 }
+                    ]
                 }
             ]
         }
@@ -191,17 +264,7 @@ async function createClusterResources(clusterInfo) {
         console.warn(`[K8S AVISO] Erro ao criar NetworkPolicy ${netpolName}:`, netErr.body ? netErr.body.message : netErr.message);
     }
 
-    // Criar os Pods
     const podPromises = [];
-    const tenantTag = userId ? `user-${String(userId).toLowerCase().replace(/[^a-z0-9-_]/g, '-').slice(0, 63)}` : null;
-
-    // Determina o particionamento do Cluster Híbrido:
-    // Se o usuário possui nó dedicado (hasDedicatedNode) e optou pelo cluster híbrido,
-    // os primeiros 'localPodsCount' pods são agendados no cluster local (on-premise)
-    // e os restantes são agendados exclusivamente na máquina dedicada da nuvem (via tenant toleration & affinity).
-    const hybridActive = Boolean(isHybrid && hasDedicatedNode && tenantTag && typeof numLocal === 'number' && typeof numCloud === 'number');
-    const localPodsCount = hybridActive ? numLocal : (hasDedicatedNode ? 0 : numMachines);
-
     for (let i = 0; i < numMachines; i++) {
         const podK8sName = i === 0 ? masterPodName : `worker-${i}-${jobId}`;
         const networkHostname = i === 0 ? 'master' : `worker-${i}`;
@@ -218,7 +281,7 @@ async function createClusterResources(clusterInfo) {
                   'terminalWeb/expiresAt': expiresAt.toString(),
                   'terminalWeb/numMachines': numMachines.toString(),
                   'terminalWeb/userId': userId.toString(),
-                  'terminalWeb/activeBackupName': activeBackupName.toString(),
+                  'terminalWeb/activeBackupName': (activeBackupName || '').toString(),
                 }
             },
             spec: {
@@ -232,6 +295,18 @@ async function createClusterResources(clusterInfo) {
                     name: 'container',
                     image: image,
                     imagePullPolicy: 'IfNotPresent', // Em prod tem que ser "Always", para sempre atualizar a imagem
+                    ports: hasDedicatedNode ? [
+                        {
+                            name: 'ssh-hostport',
+                            containerPort: 22,
+                            hostPort: machineTargets[i].port
+                        }
+                    ] : [
+                        {
+                            name: 'ssh',
+                            containerPort: 22
+                        }
+                    ],
                     resources: {
                         requests: {
                             cpu: '200m',
@@ -276,10 +351,29 @@ async function createClusterResources(clusterInfo) {
             }
         };
 
+        if (hasDedicatedNode) {
+            // Agrupa hostnames por IP único para evitar avisos ou rejeição de duplicate IP no Kubernetes
+            const aliasMap = new Map();
+            for (const t of machineTargets) {
+                if (!aliasMap.has(t.host)) {
+                    aliasMap.set(t.host, new Set());
+                }
+                aliasMap.get(t.host).add(t.alias);
+                aliasMap.get(t.host).add(t.fqdn);
+            }
+            podManifest.spec.hostAliases = Array.from(aliasMap.entries()).map(([ip, names]) => ({
+                ip,
+                hostnames: Array.from(names)
+            }));
+        }
+
         // Define se este pod específico vai para a máquina dedicada na nuvem
         const isCloudPod = hybridActive ? (i >= localPodsCount) : (hasDedicatedNode && Boolean(tenantTag));
 
         if (isCloudPod && tenantTag) {
+            const cloudIdx = hybridActive ? (i - localPodsCount) : i;
+            const assignedBurst = burstNodeList[cloudIdx % (burstNodeList.length || 1)];
+
             podManifest.spec.tolerations = [
                 {
                     key: 'tenant',
@@ -301,6 +395,18 @@ async function createClusterResources(clusterInfo) {
                     }
                 }
             };
+
+            // Fixa o pod no nó remoto correspondente para casar perfeitamente com o IP mapeado no SSH
+            if (assignedBurst && assignedBurst.nodeName) {
+                podManifest.spec.nodeSelector = {
+                    'kubernetes.io/hostname': assignedBurst.nodeName
+                };
+            }
+        } else if (!isCloudPod && hasDedicatedNode) {
+            // Em clusters híbridos, garante que o pod local rode na máquina que possui a interface Tailscale (ubuntu10)
+            podManifest.spec.nodeSelector = {
+                'kubernetes.io/hostname': 'ubuntu10'
+            };
         }
 
         //console.log(`Criando Pod: ${podName}`);
@@ -311,6 +417,7 @@ async function createClusterResources(clusterInfo) {
 }
 
 async function cleanupJob(jobId, secretName) {
+    releasePorts(jobId);
     //console.log(`Iniciando limpeza para o job: ${jobId}`);
     try {
         if (secretName) {

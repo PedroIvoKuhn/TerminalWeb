@@ -92,11 +92,8 @@ function enableHybridMode(provider, count) {
 
     if (numRemoteMachinesInput) {
         numRemoteMachinesInput.removeAttribute('readonly');
-        numRemoteMachinesInput.min = '1';
+        numRemoteMachinesInput.min = '0';
         numRemoteMachinesInput.max = '10';
-        if (!numRemoteMachinesInput.value || parseInt(numRemoteMachinesInput.value, 10) < 1) {
-            numRemoteMachinesInput.value = '1';
-        }
     }
 
     if (numMachinesInput) {
@@ -107,33 +104,48 @@ function enableHybridMode(provider, count) {
     validateHybridNodes();
 }
 
+function disableHybridMode() {
+    isBurstConnected = false;
+    connectedCloudCount = 0;
+    connectedCloudProvider = null;
+
+    if (localMachinesLabel) localMachinesLabel.style.display = 'none';
+    if (remoteMachinesContainer) remoteMachinesContainer.style.display = 'none';
+
+    if (numMachinesInput) {
+        numMachinesInput.min = '1';
+        numMachinesInput.max = '10';
+        if (parseInt(numMachinesInput.value, 10) < 1) {
+            numMachinesInput.value = '1';
+        }
+    }
+
+    if (hybridErrorAlert) {
+        hybridErrorAlert.style.display = 'none';
+    }
+    if (btnInitTerminal) {
+        btnInitTerminal.disabled = false;
+    }
+}
+
 function validateHybridNodes() {
     if (!isBurstConnected || !numRemoteMachinesInput || !numMachinesInput) return true;
 
     const remoteVal = parseInt(numRemoteMachinesInput.value, 10);
     const localVal = parseInt(numMachinesInput.value, 10);
 
-    if (isNaN(remoteVal) || remoteVal < 1) {
+    if (isNaN(remoteVal) || remoteVal < 0 || remoteVal > 10) {
         if (hybridErrorAlert) {
-            hybridErrorAlert.textContent = '⚠️ Informe pelo menos 1 máquina/pod na nuvem (mínimo: 1).';
+            hybridErrorAlert.textContent = '⚠️ Informe um número válido de máquinas na nuvem (entre 0 e 10).';
             hybridErrorAlert.style.display = 'block';
         }
         if (btnInitTerminal) btnInitTerminal.disabled = true;
         return false;
     }
 
-    if (isNaN(localVal) || localVal < 0) {
+    if (isNaN(localVal) || localVal < 0 || localVal > 10) {
         if (hybridErrorAlert) {
-            hybridErrorAlert.textContent = '⚠️ Informe um número válido de máquinas locais (mínimo: 0).';
-            hybridErrorAlert.style.display = 'block';
-        }
-        if (btnInitTerminal) btnInitTerminal.disabled = true;
-        return false;
-    }
-
-    if (localVal > remoteVal) {
-        if (hybridErrorAlert) {
-            hybridErrorAlert.textContent = `⚠️ Pela regra do laboratório, o número de máquinas locais (${localVal}) deve ser menor ou igual ao número de máquinas remotas (${remoteVal}).`;
+            hybridErrorAlert.textContent = '⚠️ Informe um número válido de máquinas locais (entre 0 e 10).';
             hybridErrorAlert.style.display = 'block';
         }
         if (btnInitTerminal) btnInitTerminal.disabled = true;
@@ -141,6 +153,15 @@ function validateHybridNodes() {
     }
 
     const totalMachines = localVal + remoteVal;
+    if (totalMachines < 1) {
+        if (hybridErrorAlert) {
+            hybridErrorAlert.textContent = '⚠️ O cluster deve ter pelo menos 1 máquina no total.';
+            hybridErrorAlert.style.display = 'block';
+        }
+        if (btnInitTerminal) btnInitTerminal.disabled = true;
+        return false;
+    }
+
     if (totalMachines > 10) {
         if (hybridErrorAlert) {
             hybridErrorAlert.textContent = `⚠️ O total combinado de máquinas (${totalMachines}) não pode exceder o limite de 10.`;
@@ -183,8 +204,10 @@ setupForm.addEventListener('submit', (e) => {
 
     if (isBurstConnected) {
         if (!validateHybridNodes()) return;
-        numCloud = parseInt(numRemoteMachinesInput.value, 10) || 1;
-        numLocal = parseInt(numMachinesInput.value, 10) || 0;
+        const rawCloud = parseInt(numRemoteMachinesInput.value, 10);
+        numCloud = isNaN(rawCloud) ? 0 : rawCloud;
+        const rawLocal = parseInt(numMachinesInput.value, 10);
+        numLocal = isNaN(rawLocal) ? 0 : rawLocal;
         numMachines = numCloud + numLocal;
         isHybrid = true;
     } else {
@@ -887,6 +910,45 @@ function syncCloudButtonState() {
     }
 }
 syncCloudButtonState();
+
+// Valida dinamicamente com o backend se os nós de burst continuam ativos após recarga (F5)
+socket.on('connect', () => {
+    socket.emit('burst:check-status');
+});
+
+socket.on('burst:status', (data) => {
+    if (data && data.connected) {
+        isBurstConnected = true;
+        connectedCloudProvider = data.provider;
+        const count = data.count || 1;
+        localStorage.setItem('connected_cloud_provider', data.provider);
+        localStorage.setItem('connected_cloud_count', count.toString());
+        enableHybridMode(data.provider, count);
+        if (btnBursting) {
+            const textSpan = btnBursting.querySelector('.burst-btn-text');
+            if (textSpan) textSpan.textContent = count > 1 ? `${data.provider} Conectada (${count}x)` : `${data.provider} Conectada`;
+            btnBursting.classList.add('connected');
+        }
+        if (burstStatusBadge) {
+            burstStatusBadge.style.display = 'inline-block';
+        }
+    } else {
+        // Se o backend confirmou que não há nós pendentes (e não há sessão de terminal ativa), limpa o cache
+        if (!localStorage.getItem('jobId')) {
+            localStorage.removeItem('connected_cloud_provider');
+            localStorage.removeItem('connected_cloud_count');
+            disableHybridMode();
+            if (btnBursting) {
+                const textSpan = btnBursting.querySelector('.burst-btn-text');
+                if (textSpan) textSpan.textContent = 'Expandir Cluster';
+                btnBursting.classList.remove('connected');
+            }
+            if (burstStatusBadge) {
+                burstStatusBadge.style.display = 'none';
+            }
+        }
+    }
+});
 
 // Helpers de Visualização
 function showBurstView(viewName) {

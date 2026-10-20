@@ -312,11 +312,13 @@ async function addNode({ provider, credentials, customJoinCommand, onProgress, o
         }
 
         const effectiveNodeName = clusterResult.readyNodes[0]?.nodeName || nodeName || nodeId;
+        const internalIp = clusterResult.readyNodes[0]?.internalIp;
         await applyTenantIsolation(effectiveNodeName, tags.userId);
 
         const singleNode = {
             nodeId,
             nodeName: effectiveNodeName,
+            internalIp,
             provider: name,
             credentials: cryptoService.encryptCredentials(resolvedCredentials)
         };
@@ -397,6 +399,7 @@ async function addNode({ provider, credentials, customJoinCommand, onProgress, o
         const finalNodes = clusterResult.readyNodes.map(n => ({
             nodeId: n.nodeId || n.nodeName,
             nodeName: n.nodeName,
+            internalIp: n.internalIp,
             provider: name,
             credentials: cryptoService.encryptCredentials(resolvedCredentials)
         }));

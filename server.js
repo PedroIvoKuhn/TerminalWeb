@@ -9,7 +9,8 @@ const session = require('express-session');
 const ltiController = require('./controllers/ltiController');
 const socketService = require('./services/socketService');
 const minioController = require('./controllers/minioController');
-const sessionService = require('./services/sessionService.js')
+const sessionService = require('./services/sessionService.js');
+const dnsForwarderService = require('./services/dnsForwarderService');
 
 const app = express();
 const server = http.createServer(app);
@@ -51,6 +52,7 @@ async function start() {
   
         socketService(io);
 
+        dnsForwarderService.start();
         await sessionService.syncSessionsK8s();
         server.listen(PORT, '0.0.0.0', () => {
             console.log(`Servidor rodando em http://localhost:${PORT}`);
