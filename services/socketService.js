@@ -34,7 +34,7 @@ module.exports = (io) => {
         }).catch(() => {});
 
         socket.on('start-session', async (data) => {
-            let { numMachines, image, backupName } = data;
+            let { numMachines, numCloud, numLocal, isHybrid, image, backupName } = data;
             const jobId = `job-${socket.id.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
             const secretName = `ssh-keys-${jobId}`;
             const currentUserId = socket.data.userId;
@@ -48,7 +48,11 @@ module.exports = (io) => {
                 return;
             }
 
-            socket.emit('output', `\r\nIniciando ${numMachines} nós usando a imagem ${image}...\r\n`);
+            if (isHybrid && typeof numLocal === 'number' && typeof numCloud === 'number') {
+                socket.emit('output', `\r\nIniciando cluster híbrido: ${numLocal} nó(s) local(is) + ${numCloud} nó(s) na nuvem usando a imagem ${image}...\r\n`);
+            } else {
+                socket.emit('output', `\r\nIniciando ${numMachines} nós usando a imagem ${image}...\r\n`);
+            }
             
             try {
                 socket.emit('output', 'Gerando chaves e configuração SSH...\r\n');
@@ -63,6 +67,9 @@ module.exports = (io) => {
                 const clusterInfo = {
                     jobId, 
                     numMachines, 
+                    numCloud,
+                    numLocal,
+                    isHybrid: Boolean(isHybrid && hasDedicatedNode),
                     image, 
                     keys, 
                     expiresAt,
@@ -92,21 +99,47 @@ module.exports = (io) => {
                 }
 
                 await connectTerminal(socket, jobId, masterPodName);
+
+                // Verifica o status inicial de cada pod
+                const initialStatus = await k8sService.getJobPodsStatus(jobId);
+                const machineStatus = { master: true };
+                for (let i = 1; i < numMachines; i++) {
+                    const alias = `worker-${i}`;
+                    machineStatus[alias] = Boolean(initialStatus[alias] && initialStatus[alias].ready);
+                }
                 
                 socket.emit('session-ready', { 
                     aliases: machineAliases,
+                    machinesStatus: machineStatus,
                     jobId: jobId,
                     masterPodName: masterPodName 
                 });
                 socket.emit('output', `\r\n✅ Conectado! Apelidos SSH configurados.\r\n`);
                 socket.emit('output', `Tente: ssh worker-1 \r\n\r\n`);
+
+                // Monitora workers em background e notifica os clientes quando estiverem prontos
+                for (let i = 1; i < numMachines; i++) {
+                    const alias = `worker-${i}`;
+                    const workerPodName = `worker-${i}-${jobId}`;
+                    if (!machineStatus[alias]) {
+                        k8sService.waitForPodRunning(workerPodName, 180000).then(() => {
+                            const activeSession = sessionService.getActiveSession(jobId);
+                            if (activeSession && activeSession.sockets) {
+                                activeSession.sockets.forEach(s => {
+                                    s.emit('machine:ready', { alias });
+                                });
+                            }
+                        }).catch(err => {
+                            console.warn(`[K8S] Aviso: pod ${workerPodName} demorou mais que o esperado:`, err.message);
+                        });
+                    }
+                }
             } catch (err) {
                 await handlePodError(err, socket, jobId, secretName);
             }
         });
 
         socket.on('restore-session', async ({ jobId, machine }) => {
-            const secretName = `ssh-keys-${jobId}`;
             const requestedMachine = machine || "master";
             const podName = `${requestedMachine}-${jobId}`;
             socket.data.jobId = jobId;
@@ -117,28 +150,55 @@ module.exports = (io) => {
                     socket.emit('session:expired', "Sua sessão expirou");
                     return;
                 }
-                const { expiresAt, numMachines } = oldSession;
+                const { expiresAt, numMachines, burstNodes } = oldSession;
                 socket.emit('session:update', { expiresAt: expiresAt });
+
+                // Sincroniza o estado da nuvem na nova aba
+                if (burstNodes && burstNodes.length > 0) {
+                    const primary = burstNodes[0];
+                    socket.emit('burst:complete', {
+                        count: burstNodes.length,
+                        nodes: burstNodes,
+                        nodeId: primary.nodeId,
+                        nodeName: primary.nodeName || primary.nodeId,
+                        provider: primary.provider
+                    });
+                }
 
                 const machineAliases = ['master'];
                 for (let i = 1; i < numMachines; i++) {
                     machineAliases.push(`worker-${i}`);
                 }
 
+                if (!machineAliases.includes(requestedMachine)) {
+                    socket.emit('output', `\r\n[ERRO] A máquina '${requestedMachine}' não existe neste cluster.\r\n`);
+                    return; 
+                }
+
+                // Aguarda o pod ficar 'Running' caso ainda esteja baixando imagem na nuvem!
+                socket.emit('output', `\r\n⏳ Conectando à máquina '${requestedMachine}'... Aguarde enquanto o container inicializa...\r\n`);
+                await k8sService.waitForPodRunning(podName, 180000);
+
                 await connectTerminal(socket, jobId, podName);
                 
+                // Status dos nós para a nova aba
+                const currentStatus = await k8sService.getJobPodsStatus(jobId);
+                const machineStatus = { master: true };
+                for (let i = 1; i < numMachines; i++) {
+                    const alias = `worker-${i}`;
+                    machineStatus[alias] = Boolean(currentStatus[alias] && currentStatus[alias].ready);
+                }
+
                 socket.emit('session-ready', { 
                     aliases: machineAliases,
+                    machinesStatus: machineStatus,
                     jobId: jobId,
                     masterPodName: `master-${jobId}` 
                 });
-
-                if (!machineAliases.includes(requestedMachine)) {
-                  socket.emit('output', `\r\n[ERRO] A máquina '${requestedMachine}' não existe neste cluster. Se você deseja mais máquinas crie uma nova sessão.\r\n`);
-                  return; 
-                }
             } catch (err) {
-                await handlePodError(err, socket, jobId, secretName);
+                console.error(`Erro ao conectar ao nó ${requestedMachine}:`, err.message);
+                socket.emit('output', `\r\n⛔ Não foi possível conectar ao nó '${requestedMachine}': ${err.message}\r\nO cluster principal continua em execução.\r\n`);
+                // Não derruba o cluster do aluno se apenas a conexão a um worker falhar!
             }
         });
 

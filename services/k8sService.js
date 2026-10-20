@@ -32,7 +32,17 @@ function generateSshConfig(numMachines, jobId, masterPodName, serviceName) {
 
 // Funções exportadas
 
-async function waitForPodRunning(name) {
+async function waitForPodRunning(name, timeoutMs = 90000) {
+    // 1. Checa imediatamente se o pod já está Running
+    try {
+        const directCheck = await k8sApi.readNamespacedPod(name, namespace);
+        if (directCheck.body && directCheck.body.status && directCheck.body.status.phase === 'Running') {
+            return;
+        }
+    } catch (e) {
+        // Se ainda não existir ou der erro temporário, segue para o watcher
+    }
+
     const watcher = new k8s.Watch(kc);
     
     return new Promise((resolve, reject) => {
@@ -42,13 +52,12 @@ async function waitForPodRunning(name) {
         const cleanup = () => {
             clearTimeout(timeoutId);
             if (req) {
-                req.abort();
+                try { req.abort(); } catch (e) {}
             }
         };
 
         const watchCallback = (type, apiObj) => {
             if (apiObj.status && apiObj.status.phase === 'Running') {
-                //console.log(`Pod ${name} está 'Running'.`);
                 cleanup();
                 resolve();
             }
@@ -70,6 +79,9 @@ async function waitForPodRunning(name) {
             errorCallback
         ).then(r => {
             req = r;
+        }).catch(err => {
+            cleanup();
+            reject(err);
         });
 
         timeoutId = setTimeout(() => {
@@ -77,12 +89,46 @@ async function waitForPodRunning(name) {
             console.error(timeoutError.message);
             cleanup();
             reject(timeoutError);
-        }, 90000);
+        }, timeoutMs);
     });
 }
 
+async function getJobPodsStatus(jobId) {
+    try {
+        const response = await k8sApi.listNamespacedPod(
+            namespace,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            `job-id=${jobId}`
+        );
+        const pods = response.body.items || [];
+        const statusMap = {};
+        for (const pod of pods) {
+            const name = pod.metadata.name;
+            const phase = (pod.status && pod.status.phase) || 'Pending';
+            const isRunning = phase === 'Running';
+            let alias = 'master';
+            if (name.startsWith('worker-')) {
+                const parts = name.split('-');
+                alias = `${parts[0]}-${parts[1]}`;
+            }
+            statusMap[alias] = {
+                podName: name,
+                phase: phase,
+                ready: isRunning
+            };
+        }
+        return statusMap;
+    } catch (err) {
+        console.error(`Erro ao obter status dos pods do job ${jobId}:`, err.message);
+        return {};
+    }
+}
+
 async function createClusterResources(clusterInfo) {
-    const { jobId, image, keys, expiresAt, numMachines, userId, activeBackupName, hasDedicatedNode } = clusterInfo;
+    const { jobId, image, keys, expiresAt, numMachines, numCloud, numLocal, isHybrid, userId, activeBackupName, hasDedicatedNode } = clusterInfo;
     const masterPodName = `master-${jobId}`;
     const serviceName = `svc-${jobId}`;
     const secretName = `ssh-keys-${jobId}`;
@@ -148,6 +194,13 @@ async function createClusterResources(clusterInfo) {
     // Criar os Pods
     const podPromises = [];
     const tenantTag = userId ? `user-${String(userId).toLowerCase().replace(/[^a-z0-9-_]/g, '-').slice(0, 63)}` : null;
+
+    // Determina o particionamento do Cluster Híbrido:
+    // Se o usuário possui nó dedicado (hasDedicatedNode) e optou pelo cluster híbrido,
+    // os primeiros 'localPodsCount' pods são agendados no cluster local (on-premise)
+    // e os restantes são agendados exclusivamente na máquina dedicada da nuvem (via tenant toleration & affinity).
+    const hybridActive = Boolean(isHybrid && hasDedicatedNode && tenantTag && typeof numLocal === 'number' && typeof numCloud === 'number');
+    const localPodsCount = hybridActive ? numLocal : (hasDedicatedNode ? 0 : numMachines);
 
     for (let i = 0; i < numMachines; i++) {
         const podK8sName = i === 0 ? masterPodName : `worker-${i}-${jobId}`;
@@ -223,8 +276,10 @@ async function createClusterResources(clusterInfo) {
             }
         };
 
-        // Se o usuário possui máquina dedicada (Cloud Bursting), isola o pod exclusivamente nela
-        if (hasDedicatedNode && tenantTag) {
+        // Define se este pod específico vai para a máquina dedicada na nuvem
+        const isCloudPod = hybridActive ? (i >= localPodsCount) : (hasDedicatedNode && Boolean(tenantTag));
+
+        if (isCloudPod && tenantTag) {
             podManifest.spec.tolerations = [
                 {
                     key: 'tenant',
@@ -390,4 +445,5 @@ module.exports = {
     getActiveJobs, 
     updateJobExpiration,
     connectPodToTerminal,
+    getJobPodsStatus,
 };

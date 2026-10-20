@@ -7,6 +7,11 @@ const setupContainer = document.getElementById('setup-container');
 const terminalContainer = document.getElementById('terminal-container');
 const setupForm = document.getElementById('setup-form');
 const numMachinesInput = document.getElementById('num-machines');
+const localMachinesLabel = document.getElementById('local-machines-label');
+const remoteMachinesContainer = document.getElementById('remote-machines-container');
+const numRemoteMachinesInput = document.getElementById('num-remote-machines');
+const hybridErrorAlert = document.getElementById('hybrid-error-alert');
+const btnInitTerminal = document.getElementById('btn-init-terminal');
 
 let myMasterPodName = null;
 let currentLoadedBackup = localStorage.getItem('active_backup_name') || null;;
@@ -75,18 +80,102 @@ const term = new Terminal({
 const fitAddon = new FitAddon.FitAddon();
 term.loadAddon(fitAddon);
 
+let connectedCloudCount = 0;
+
+function enableHybridMode(provider, count) {
+    isBurstConnected = true;
+    connectedCloudCount = count || 1;
+    connectedCloudProvider = provider || 'Cloud';
+
+    if (localMachinesLabel) localMachinesLabel.style.display = 'inline';
+    if (remoteMachinesContainer) remoteMachinesContainer.style.display = 'inline';
+
+    if (numRemoteMachinesInput) {
+        numRemoteMachinesInput.value = connectedCloudCount;
+        numRemoteMachinesInput.max = connectedCloudCount;
+    }
+
+    if (numMachinesInput) {
+        numMachinesInput.max = connectedCloudCount;
+        numMachinesInput.min = 0;
+        numMachinesInput.value = Math.min(parseInt(numMachinesInput.value, 10) || 1, connectedCloudCount);
+    }
+
+    validateHybridNodes();
+}
+
+function validateHybridNodes() {
+    if (!isBurstConnected || !numRemoteMachinesInput || !numMachinesInput) return true;
+
+    const remoteVal = parseInt(numRemoteMachinesInput.value, 10) || 1;
+    const localVal = parseInt(numMachinesInput.value, 10);
+
+    if (isNaN(localVal) || localVal < 0) {
+        if (hybridErrorAlert) {
+            hybridErrorAlert.textContent = '⚠️ Informe um número válido de máquinas locais (mínimo: 0).';
+            hybridErrorAlert.style.display = 'block';
+        }
+        if (btnInitTerminal) btnInitTerminal.disabled = true;
+        return false;
+    }
+
+    if (localVal > remoteVal) {
+        if (hybridErrorAlert) {
+            hybridErrorAlert.textContent = `⚠️ Pela regra do laboratório, o número de máquinas locais (${localVal}) deve ser menor ou igual ao número de máquinas remotas (${remoteVal}).`;
+            hybridErrorAlert.style.display = 'block';
+        }
+        if (btnInitTerminal) btnInitTerminal.disabled = true;
+        return false;
+    }
+
+    if (hybridErrorAlert) {
+        hybridErrorAlert.style.display = 'none';
+    }
+    if (btnInitTerminal) {
+        btnInitTerminal.disabled = false;
+    }
+    return true;
+}
+
+if (numMachinesInput) {
+    numMachinesInput.addEventListener('input', validateHybridNodes);
+    numMachinesInput.addEventListener('change', validateHybridNodes);
+}
+
 // --- Inicializando terminal ---
 setupForm.addEventListener('submit', (e) => {
     e.preventDefault(); 
-    const numMachines = parseInt(numMachinesInput.value, 10);
     const image = document.querySelector('meta[name="image"]').getAttribute('content');
     const backupName = selectBackup.value;
     currentLoadedBackup = backupName || null;
 
+    let numMachines = 1;
+    let numCloud = 0;
+    let numLocal = 0;
+    let isHybrid = false;
+
+    if (isBurstConnected) {
+        if (!validateHybridNodes()) return;
+        numCloud = parseInt(numRemoteMachinesInput.value, 10) || 1;
+        numLocal = parseInt(numMachinesInput.value, 10) || 0;
+        numMachines = numCloud + numLocal;
+        isHybrid = true;
+    } else {
+        numMachines = parseInt(numMachinesInput.value, 10);
+        numLocal = numMachines;
+        numCloud = 0;
+    }
 
     if (numMachines > 0) {
         localStorage.setItem('active_backup_name', backupName);
-        socket.emit('start-session', { numMachines: numMachines, image: image, backupName: backupName });
+        socket.emit('start-session', { 
+            numMachines: numMachines, 
+            numCloud: numCloud, 
+            numLocal: numLocal, 
+            isHybrid: isHybrid,
+            image: image, 
+            backupName: backupName 
+        });
         initializeTerminal();
     }
 });
@@ -517,23 +606,47 @@ socket.on('session-ready', (data) => {
 
     data.aliases.forEach(alias => {
         const btn = document.createElement('button');
-        btn.textContent = `${alias}`;
+        btn.id = `btn-machine-${alias}`;
         btn.className = 'btn-machine';
         const urlParams = new URLSearchParams(window.location.search);
+        const isSelf = (alias === targetMachine);
+        const isReady = (data.machinesStatus && data.machinesStatus[alias] !== undefined)
+            ? Boolean(data.machinesStatus[alias])
+            : true;
 
-        if (alias === targetMachine) {
-          btn.disabled = true;
+        if (!isReady && !isSelf) {
+            btn.textContent = `⏳ ${alias} (Iniciando...)`;
+            btn.disabled = true;
+            btn.classList.add('machine-starting');
+            btn.title = 'Aguarde: nó inicializando na nuvem...';
+        } else {
+            btn.textContent = `${alias}`;
+            if (isSelf) {
+                btn.disabled = true;
+            }
         }
 
         btn.onclick = () => {
+            if (btn.classList.contains('machine-starting') || btn.disabled) return;
             urlParams.set('machine', alias);
-        
             const novaUrl = `${window.location.pathname}?${urlParams.toString()}`;
             window.open(novaUrl, '_blank');
         };
 
         machineList.appendChild(btn);
     });
+
+socket.on('machine:ready', ({ alias }) => {
+    const btn = document.getElementById(`btn-machine-${alias}`);
+    if (btn) {
+        btn.textContent = `${alias}`;
+        btn.classList.remove('machine-starting');
+        btn.title = '';
+        if (alias !== targetMachine) {
+            btn.disabled = false;
+        }
+    }
+});
 
     if (data.masterPodName) {
         //console.log("Pod Mestre identificado:", data.masterPodName);
@@ -586,6 +699,8 @@ socket.on('session:expired', () => {
     timerBar.style.display = 'none';
     localStorage.removeItem("jobId");
     localStorage.removeItem('active_backup_name');
+    localStorage.removeItem('connected_cloud_provider');
+    localStorage.removeItem('connected_cloud_count');
     document.getElementById('expired-modal').style.display = 'flex';
 });
 
@@ -607,6 +722,8 @@ document.getElementById('btn-reload').addEventListener('click', () => {
 });
 
 document.getElementById('btn-kill-session').addEventListener('click', () => {
+    localStorage.removeItem('connected_cloud_provider');
+    localStorage.removeItem('connected_cloud_count');
     socket.emit("kill-session");
 });
 
@@ -723,6 +840,25 @@ let selectedCloudProvider = 'AWS';
 let currentBurstStep = 1;
 let isBurstConnected = false;
 let connectedCloudProvider = null;
+
+// Sincroniza o estado da nuvem conectada a partir do localStorage imediatamente ao abrir a aba
+function syncCloudButtonState() {
+    const savedProvider = localStorage.getItem('connected_cloud_provider');
+    const savedCount = parseInt(localStorage.getItem('connected_cloud_count'), 10) || 1;
+    if (savedProvider && btnBursting) {
+        isBurstConnected = true;
+        connectedCloudProvider = savedProvider;
+        const textSpan = btnBursting.querySelector('.burst-btn-text');
+        if (textSpan) {
+            textSpan.textContent = savedCount > 1 ? `${savedProvider} Conectada (${savedCount}x)` : `${savedProvider} Conectada`;
+        }
+        btnBursting.classList.add('connected');
+        if (burstStatusBadge) {
+            burstStatusBadge.style.display = 'inline-block';
+        }
+    }
+}
+syncCloudButtonState();
 
 // Helpers de Visualização
 function showBurstView(viewName) {
@@ -1162,6 +1298,10 @@ socket.on('burst:complete', ({ nodeId, nodeName, provider, count, nodes }) => {
         ? `${nodeCount} nós (${nodes ? nodes.map(n => n.nodeName || n.nodeId).join(', ') : `${nodeCount} instâncias`})`
         : (nodeName || nodeId);
 
+    // Salva no localStorage para sincronizar todas as abas
+    localStorage.setItem('connected_cloud_provider', connectedCloudProvider);
+    localStorage.setItem('connected_cloud_count', nodeCount.toString());
+
     logBurstConsole(`✅ Sucesso! ${isMulti ? `${nodeCount} nós integrados` : `Nó ${displayName}`} (${connectedCloudProvider}) ao cluster MicroK8s.`);
 
     if (btnBurstFinish) btnBurstFinish.style.display = 'inline-block';
@@ -1175,6 +1315,14 @@ socket.on('burst:complete', ({ nodeId, nodeName, provider, count, nodes }) => {
     }
     if (burstStatusBadge) {
         burstStatusBadge.style.display = 'inline-block';
+    }
+
+    // Ativa o modo híbrido dinamicamente na tela inicial
+    enableHybridMode(connectedCloudProvider, nodeCount);
+
+    const setupBurstBanner = document.querySelector('.setup-burst-banner');
+    if (setupBurstBanner) {
+        setupBurstBanner.innerHTML = `<span>✅ <strong>${connectedCloudProvider} Conectada</strong> (${nodeCount} máquina${nodeCount > 1 ? 's' : ''} ativa${nodeCount > 1 ? 's' : ''} pronta${nodeCount > 1 ? 's' : ''})</span>`;
     }
 });
 

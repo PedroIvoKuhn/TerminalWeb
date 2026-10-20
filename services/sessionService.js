@@ -146,8 +146,12 @@ function restoreSession(jobId, newSocket) {
 
     session.sockets.add(newSocket);
 
-    const { expiresAt, numMachines } = session;
-    return { expiresAt, numMachines };
+    const { expiresAt, numMachines, burstNodes } = session;
+    return { expiresAt, numMachines, burstNodes: burstNodes || [] };
+}
+
+function getActiveSession(jobId) {
+    return activeSessions[jobId] || null;
 }
 
 async function terminateSession(jobId) {
@@ -367,5 +371,6 @@ module.exports = {
     cleanupPendingBurst,
     registerBurstNode,
     hasBurstNodes,
-    getBurstNodes
+    getBurstNodes,
+    getActiveSession
 };

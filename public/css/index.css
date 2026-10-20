@@ -105,6 +105,13 @@
     background: var(--cinza-destaque);
 }
 
+.btn-machine.machine-starting {
+    background: #333 !important;
+    color: #fcd34d !important;
+    cursor: wait !important;
+    opacity: 0.85;
+}
+
 #btn-extend,
 #btn-salvar-novo,
 .btn-cloud-burst.connected {
