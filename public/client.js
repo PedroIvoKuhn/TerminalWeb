@@ -17,7 +17,7 @@ let myMasterPodName = null;
 let currentLoadedBackup = localStorage.getItem('active_backup_name') || null;;
 const selectBackup = document.getElementById('select-backup');
 
-let cacheArquivos = {}; 
+let cacheArquivos = {};
 
 function getLtik() {
     const urlParams = new URLSearchParams(window.location.search);
@@ -64,8 +64,8 @@ const term = new Terminal({
         green: '#50fa7b',
         yellow: '#f1fa8c',
         blue: '#bd93f9',
-        magenta: '#ff79c6',    
-        cyan: '#8be9fd',       
+        magenta: '#ff79c6',
+        cyan: '#8be9fd',
         white: '#f8f8f2',
         brightBlack: '#6272a4',
         brightRed: '#ff6e6e',
@@ -91,14 +91,17 @@ function enableHybridMode(provider, count) {
     if (remoteMachinesContainer) remoteMachinesContainer.style.display = 'inline';
 
     if (numRemoteMachinesInput) {
-        numRemoteMachinesInput.value = connectedCloudCount;
-        numRemoteMachinesInput.max = connectedCloudCount;
+        numRemoteMachinesInput.removeAttribute('readonly');
+        numRemoteMachinesInput.min = '1';
+        numRemoteMachinesInput.max = '10';
+        if (!numRemoteMachinesInput.value || parseInt(numRemoteMachinesInput.value, 10) < 1) {
+            numRemoteMachinesInput.value = '1';
+        }
     }
 
     if (numMachinesInput) {
-        numMachinesInput.max = connectedCloudCount;
-        numMachinesInput.min = 0;
-        numMachinesInput.value = Math.min(parseInt(numMachinesInput.value, 10) || 1, connectedCloudCount);
+        numMachinesInput.min = '0';
+        numMachinesInput.max = '10';
     }
 
     validateHybridNodes();
@@ -107,8 +110,17 @@ function enableHybridMode(provider, count) {
 function validateHybridNodes() {
     if (!isBurstConnected || !numRemoteMachinesInput || !numMachinesInput) return true;
 
-    const remoteVal = parseInt(numRemoteMachinesInput.value, 10) || 1;
+    const remoteVal = parseInt(numRemoteMachinesInput.value, 10);
     const localVal = parseInt(numMachinesInput.value, 10);
+
+    if (isNaN(remoteVal) || remoteVal < 1) {
+        if (hybridErrorAlert) {
+            hybridErrorAlert.textContent = '⚠️ Informe pelo menos 1 máquina/pod na nuvem (mínimo: 1).';
+            hybridErrorAlert.style.display = 'block';
+        }
+        if (btnInitTerminal) btnInitTerminal.disabled = true;
+        return false;
+    }
 
     if (isNaN(localVal) || localVal < 0) {
         if (hybridErrorAlert) {
@@ -122,6 +134,16 @@ function validateHybridNodes() {
     if (localVal > remoteVal) {
         if (hybridErrorAlert) {
             hybridErrorAlert.textContent = `⚠️ Pela regra do laboratório, o número de máquinas locais (${localVal}) deve ser menor ou igual ao número de máquinas remotas (${remoteVal}).`;
+            hybridErrorAlert.style.display = 'block';
+        }
+        if (btnInitTerminal) btnInitTerminal.disabled = true;
+        return false;
+    }
+
+    const totalMachines = localVal + remoteVal;
+    if (totalMachines > 10) {
+        if (hybridErrorAlert) {
+            hybridErrorAlert.textContent = `⚠️ O total combinado de máquinas (${totalMachines}) não pode exceder o limite de 10.`;
             hybridErrorAlert.style.display = 'block';
         }
         if (btnInitTerminal) btnInitTerminal.disabled = true;
@@ -142,9 +164,14 @@ if (numMachinesInput) {
     numMachinesInput.addEventListener('change', validateHybridNodes);
 }
 
+if (numRemoteMachinesInput) {
+    numRemoteMachinesInput.addEventListener('input', validateHybridNodes);
+    numRemoteMachinesInput.addEventListener('change', validateHybridNodes);
+}
+
 // --- Inicializando terminal ---
 setupForm.addEventListener('submit', (e) => {
-    e.preventDefault(); 
+    e.preventDefault();
     const image = document.querySelector('meta[name="image"]').getAttribute('content');
     const backupName = selectBackup.value;
     currentLoadedBackup = backupName || null;
@@ -168,13 +195,13 @@ setupForm.addEventListener('submit', (e) => {
 
     if (numMachines > 0) {
         localStorage.setItem('active_backup_name', backupName);
-        socket.emit('start-session', { 
-            numMachines: numMachines, 
-            numCloud: numCloud, 
-            numLocal: numLocal, 
+        socket.emit('start-session', {
+            numMachines: numMachines,
+            numCloud: numCloud,
+            numLocal: numLocal,
             isHybrid: isHybrid,
-            image: image, 
-            backupName: backupName 
+            image: image,
+            backupName: backupName
         });
         initializeTerminal();
     }
@@ -215,13 +242,13 @@ if (downloadListContainer) {
         } else if (action === 'toggle-folder') {
             const parentLi = target.closest('.tree-folder');
             const childContainer = parentLi.querySelector('.tree-children');
-            
+
             if (childContainer) {
                 const isHidden = childContainer.style.display === 'none';
                 childContainer.style.display = isHidden ? 'block' : 'none';
-                
-                target.innerText = isHidden 
-                    ? target.innerText.replace('▶', '▼') 
+
+                target.innerText = isHidden
+                    ? target.innerText.replace('▶', '▼')
                     : target.innerText.replace('▼', '▶');
             }
         }
@@ -231,39 +258,39 @@ if (downloadListContainer) {
 async function loadDownloadList() {
     const listUl = document.getElementById('download-list');
     const select = document.getElementById('select-backup');
-    
+
     try {
         const res = await fetch('/api/backups');
         if (!res.ok) throw new Error("Erro ao buscar lista");
         const files = await res.json();
 
         // 1. Preenche o Dropdown (Select)
-        if(select) {
+        if (select) {
             select.innerHTML = '<option value="">-- Começar do Zero (Vazio) --</option>';
             files.forEach(arq => {
                 const rawName = arq.name.split('/')[1];
-                if(!rawName) return;
+                if (!rawName) return;
                 const cleanName = rawName.replace('.tar.gz', '');
                 const option = document.createElement('option');
                 option.value = cleanName;
                 option.textContent = `📂 ${cleanName}`;
                 select.appendChild(option);
             });
-            if(currentLoadedBackup) select.value = currentLoadedBackup;
+            if (currentLoadedBackup) select.value = currentLoadedBackup;
         }
 
         // 2. Preenche a Lista de Baixo (Downloads + Navegação)
         if (listUl) {
             listUl.innerHTML = '';
-            
+
             if (files.length === 0) {
                 listUl.innerHTML = '<li style="color:#777; font-size: 0.9em;">Nenhum arquivo encontrado.</li>';
                 return;
             }
 
             files.forEach(file => {
-                const rawName = file.name.split('/')[1]; 
-                if(!rawName) return;
+                const rawName = file.name.split('/')[1];
+                if (!rawName) return;
 
                 const cleanName = rawName.replace('.tar.gz', '');
                 const sizeMB = (file.size / 1024 / 1024).toFixed(2);
@@ -271,7 +298,7 @@ async function loadDownloadList() {
 
                 const li = document.createElement('li');
                 li.classList.add('backup-list-item');
-                
+
                 li.innerHTML = `
                     <div class="backup-item-header">
                         <span class="backup-title">📦 ${cleanName} <small class="backup-size">(${sizeMB} MB)</small></span>
@@ -309,7 +336,7 @@ async function loadDownloadList() {
 async function toggleNavigation(rawBackupName, btnElement) {
     const cleanName = rawBackupName.replace('.tar.gz', '');
     const container = document.getElementById(`tree-container-${cleanName}`);
-    
+
     if (container.style.display === 'block') {
         container.style.display = 'none';
         btnElement.innerText = '📂 Navegar';
@@ -328,18 +355,18 @@ async function toggleNavigation(rawBackupName, btnElement) {
         const res = await fetch(`/api/backups/content?fileName=${encodeURIComponent(rawBackupName)}`);
         if (!res.ok) throw new Error("Erro ao carregar");
         const files = await res.json();
-        
+
         fileCache[rawBackupName] = files;
         drawTree(container, files, rawBackupName);
-    } catch (e) { 
-        container.innerHTML = '<span style="color:red">Erro ao carregar arquivos.</span>'; 
+    } catch (e) {
+        container.innerHTML = '<span style="color:red">Erro ao carregar arquivos.</span>';
     }
 };
 
 function drawTree(container, allFiles, backupName) {
     container.innerHTML = '';
     const cleanList = allFiles.filter(f => f.name && f.name.trim() !== '');
-    
+
     if (cleanList.length === 0) {
         container.innerHTML = '<small style="color:#777">Backup vazio.</small>';
         return;
@@ -356,7 +383,7 @@ function renderTreeLevel(allFiles, currentPrefix, backupName) {
 
     allFiles.forEach(file => {
         if (!file.name.startsWith(currentPrefix)) return;
-        
+
         const relativePath = file.name.slice(currentPrefix.length);
         const parts = relativePath.split('/');
 
@@ -430,7 +457,7 @@ function updateBackupUI() {
 // --- Lógica de Backup (Agora só calcula Cota e atualiza listas externas) ---
 async function loadBackups() {
     const statusLbl = document.getElementById('status-cota');
-    await loadDownloadList(); 
+    await loadDownloadList();
 
     try {
         const res = await fetch('/api/backups');
@@ -439,13 +466,13 @@ async function loadBackups() {
             return;
         }
         const files = await res.json();
-        
+
         let totalSize = 0;
         files.forEach(arq => {
             totalSize += arq.size;
         });
-        
-        if(statusLbl) statusLbl.innerText = `Uso: ${(totalSize/1024/1024).toFixed(2)} / 100 MB`;
+
+        if (statusLbl) statusLbl.innerText = `Uso: ${(totalSize / 1024 / 1024).toFixed(2)} / 100 MB`;
 
     } catch (e) {
         console.error("Erro cota", e);
@@ -454,10 +481,10 @@ async function loadBackups() {
 
 // --- SALVAR ---
 async function saveFile(targetName) {
-    if(!myMasterPodName) return alert('Erro: Pod não conectado.');
-    
+    if (!myMasterPodName) return alert('Erro: Pod não conectado.');
+
     targetName = targetName.trim();
-    if(!targetName) return alert("Nome inválido");
+    if (!targetName) return alert("Nome inválido");
 
     const alreadyExists = Array.from(selectBackup.options).some(o => o.value === targetName);
 
@@ -471,40 +498,40 @@ async function saveFile(targetName) {
         const res = await fetch('/api/backups', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                podName: myMasterPodName, 
-                fileName: targetName 
+            body: JSON.stringify({
+                podName: myMasterPodName,
+                fileName: targetName
             })
         });
         const json = await res.json();
-        
-        if(json.error){ 
+
+        if (json.error) {
             AppModal.alert('Erro', json.error);
         } else {
             AppModal.alert('Salvo', 'Backup salvo com sucesso!');
             currentLoadedBackup = targetName;
             localStorage.setItem('active_backup_name', targetName);
-            updateBackupUI(); 
+            updateBackupUI();
             socket.emit('update-active-backup', targetName);
 
             const rawName = targetName + ".tar.gz";
-            if(fileCache[rawName]) delete fileCache[rawName];
-            
+            if (fileCache[rawName]) delete fileCache[rawName];
+
             await loadBackups();
-            
+
             const inputNew = document.getElementById('nome-backup');
-            if(inputNew) inputNew.value = '';
+            if (inputNew) inputNew.value = '';
         }
-    } catch(e) { 
-        alert('Erro de conexão ao salvar.'); 
+    } catch (e) {
+        alert('Erro de conexão ao salvar.');
     }
 };
 
 const btnSaveNew = document.getElementById('btn-salvar-novo');
-if(btnSaveNew) {
+if (btnSaveNew) {
     btnSaveNew.addEventListener('click', () => {
         let nameInput = document.getElementById('nome-backup').value;
-        if(!nameInput) return alert("Digite um nome para o novo arquivo.");
+        if (!nameInput) return alert("Digite um nome para o novo arquivo.");
         saveFile(nameInput);
     });
 }
@@ -513,18 +540,18 @@ if(btnSaveNew) {
 async function deleteFile(fullName) {
     const confirmed = await AppModal.confirm('Atenção!', 'Tem certeza que deseja APAGAR este arquivo permanentemente?');
     if (!confirmed) return;
-    
+
     try {
         await fetch('/api/backups', {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ fullName: fullName })
         });
-        
+
         const cleanName = fullName.split('/')[1].replace('.tar.gz', '');
         if (fileCache[fullName]) delete fileCache[fullName];
 
-        if(cleanName === currentLoadedBackup) {
+        if (cleanName === currentLoadedBackup) {
             currentLoadedBackup = null;
             localStorage.removeItem('active_backup_name');
             updateBackupUI();
@@ -562,18 +589,18 @@ function startCountdown(expiresAt) {
     countdownInterval = setInterval(() => {
         const now = Date.now();
         const timeLeft = expiresAt - now;
-        if ( timeLeft > (1000 * 60 * 60 * 12) ) {
-          const btn = document.getElementById('btn-extend-24h')
-          if (!btn.disabled) {
-            btn.disabled = true;
-            btn.title = "Disponível apenas quando faltar menos de 12 horas para encerrar a sessão.";
-          } 
+        if (timeLeft > (1000 * 60 * 60 * 12)) {
+            const btn = document.getElementById('btn-extend-24h')
+            if (!btn.disabled) {
+                btn.disabled = true;
+                btn.title = "Disponível apenas quando faltar menos de 12 horas para encerrar a sessão.";
+            }
         } else {
-          const btn = document.getElementById('btn-extend-24h');
-          if (btn.disabled && btn.textContent !== "Processando...") {
-            btn.disabled = false;
-            btn.title = "";
-          } 
+            const btn = document.getElementById('btn-extend-24h');
+            if (btn.disabled && btn.textContent !== "Processando...") {
+                btn.disabled = false;
+                btn.title = "";
+            }
         }
 
         // Atualiza o texto
@@ -581,7 +608,7 @@ function startCountdown(expiresAt) {
         const timer = document.getElementById('timer');
 
         // Se faltar menos de 20 minutos (ou o tempo do aviso), deixa vermelho
-        if (timeLeft < 1000 * 60 * 20) { 
+        if (timeLeft < 1000 * 60 * 20) {
             timer.classList.add('timer-critical');
         } else {
             timer.classList.remove('timer-critical');
@@ -615,7 +642,7 @@ socket.on('session-ready', (data) => {
             : true;
 
         if (!isReady && !isSelf) {
-            btn.textContent = `⏳ ${alias} (Iniciando...)`;
+            btn.textContent = `${alias} (Iniciando...)`;
             btn.disabled = true;
             btn.classList.add('machine-starting');
             btn.title = 'Aguarde: nó inicializando na nuvem...';
@@ -636,24 +663,24 @@ socket.on('session-ready', (data) => {
         machineList.appendChild(btn);
     });
 
-socket.on('machine:ready', ({ alias }) => {
-    const btn = document.getElementById(`btn-machine-${alias}`);
-    if (btn) {
-        btn.textContent = `${alias}`;
-        btn.classList.remove('machine-starting');
-        btn.title = '';
-        if (alias !== targetMachine) {
-            btn.disabled = false;
+    socket.on('machine:ready', ({ alias }) => {
+        const btn = document.getElementById(`btn-machine-${alias}`);
+        if (btn) {
+            btn.textContent = `${alias}`;
+            btn.classList.remove('machine-starting');
+            btn.title = '';
+            if (alias !== targetMachine) {
+                btn.disabled = false;
+            }
         }
-    }
-});
+    });
 
     if (data.masterPodName) {
         //console.log("Pod Mestre identificado:", data.masterPodName);
         myMasterPodName = data.masterPodName;
-        
+
         const backupUi = document.getElementById('backup-ui');
-        if(backupUi) {
+        if (backupUi) {
             backupUi.style.display = 'block';
             updateBackupUI();
             loadBackups();
@@ -710,7 +737,7 @@ document.getElementById('btn-extend').addEventListener('click', (e) => {
     document.getElementById('btn-ignore').disabled = true;
 
     document.querySelector('#session-modal h2').textContent = "Estendendo...";
-    socket.emit('session:extend-response'); 
+    socket.emit('session:extend-response');
 });
 
 document.getElementById('btn-ignore').addEventListener('click', () => {
@@ -741,18 +768,18 @@ document.getElementById('btn-extend-24h').addEventListener('click', (e) => {
 
 // --- EVENTOS DA SESSÃO ---
 const jobId = localStorage.getItem("jobId");
-if(jobId) {
+if (jobId) {
     initializeTerminal();
-    socket.emit("restore-session", { 
-    jobId: jobId,
-    machine: targetMachine,
-  });
+    socket.emit("restore-session", {
+        jobId: jobId,
+        machine: targetMachine,
+    });
 }
 
 // --- CONTROLADOR DE MODAL DINÂMICO ---
 const AppModal = {
     // Retorna uma Promise que resolve 'true' (Confirmar) ou 'false' (Cancelar)
-    show: function({ title, message, type = 'alert', confirmText = 'OK', cancelText = 'Cancelar' }) {
+    show: function ({ title, message, type = 'alert', confirmText = 'OK', cancelText = 'Cancelar' }) {
         return new Promise((resolve) => {
             const modal = document.getElementById('custom-modal');
             const elTitle = document.getElementById('custom-modal-title');
@@ -856,6 +883,7 @@ function syncCloudButtonState() {
         if (burstStatusBadge) {
             burstStatusBadge.style.display = 'inline-block';
         }
+        enableHybridMode(savedProvider, savedCount);
     }
 }
 syncCloudButtonState();
@@ -954,7 +982,7 @@ function clearCloudSessionCredentials() {
             'tw_azure_location', 'tw_azure_vm_size', 'tw_azure_rg'
         ];
         keysToRemove.forEach(k => sessionStorage.removeItem(k));
-    } catch (e) {}
+    } catch (e) { }
 }
 
 if (burstChkRemember) {
@@ -1026,7 +1054,7 @@ function loadSavedCredentials(provider) {
             if (savedVm) document.getElementById('azure-input-vm-size').value = savedVm;
             if (savedRg) document.getElementById('azure-input-rg').value = savedRg;
         }
-    } catch (e) {}
+    } catch (e) { }
 }
 
 function saveCredentialsToSession(provider, creds) {
@@ -1044,7 +1072,7 @@ function saveCredentialsToSession(provider, creds) {
             'tw_azure_location', 'tw_azure_vm_size', 'tw_azure_rg'
         ];
         legacyKeys.forEach(k => sessionStorage.removeItem(k));
-    } catch (e) {}
+    } catch (e) { }
 }
 
 function selectProvider(provider) {
