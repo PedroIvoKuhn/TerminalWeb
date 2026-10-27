@@ -423,7 +423,9 @@ async function listBurstNodes(credentials = {}) {
 
         return instances;
     } catch (error) {
-        console.error("[ERRO] Falha ao listar as instâncias:", error);
+        if (error.name !== 'AuthFailure' && error.name !== 'CredentialsProviderError' && error.Code !== 'AuthFailure') {
+            console.error("[ERRO] Falha ao listar as instâncias:", error);
+        }
         throw error;
     }
 }

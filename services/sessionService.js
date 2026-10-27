@@ -360,42 +360,8 @@ async function cleanupOrphanBurstNodes() {
       console.warn(`[SYNC AVISO] Falha ao consultar nós do Kubernetes:`, k8sErr.message);
     }
 
-    // 4. Limpeza de instâncias órfãs remanescentes na Nuvem (Azure e AWS)
-    const cloudProviders = ['AZURE', 'AWS'];
-    for (const provider of cloudProviders) {
-      try {
-        const burstNodes = await cloudBurstingService.listBurstNodes({ provider });
-        for (const node of burstNodes) {
-          const nodeJobId = node.jobId || node.tags?.JobId;
-          if (!nodeJobId || String(nodeJobId).startsWith('pending-') || !activeJobIds.has(nodeJobId)) {
-            const targetId = node.id || node.name;
-            console.log(`[SYNC] Encontrado nó órfão ${targetId} (${nodeJobId}) na nuvem ${provider}. Removendo...`);
-            try {
-              await cloudBurstingService.removeNode({
-                nodeId: targetId,
-                nodeName: targetId,
-                provider
-              });
-            } catch (err) {
-              console.warn(`[SYNC AVISO] Erro ao remover nó órfão ${targetId} da nuvem ${provider}:`, err.message);
-            }
-          }
-        }
-      } catch (_) {
-        // Silenciosamente ignora provedores que não possuem credenciais configuradas no momento
-      }
-    }
-
-    // 5. Limpeza de recursos órfãos na nuvem (IPs públicos livres / NICs ociosas) para garantir custo zero
-    try {
-      if (process.env.AZURE_SUBSCRIPTION_ID) {
-        await cloudBurstingService.cleanupOrphanResources({ provider: 'AZURE' });
-      }
-    } catch (orphanResErr) {
-      // Ignora caso credenciais não estejam no .env
-    }
   } catch (outerErr) {
-    console.warn(`[SYNC AVISO] Falha durante sincronização de órfãos:`, outerErr.message);
+    console.warn(`[SYNC AVISO] Falha durante sincronização de nós locais no K8s:`, outerErr.message);
   } finally {
     isCleaningUpOrphans = false;
   }

@@ -1,4 +1,17 @@
 require("dotenv").config();
+
+// Adiciona timestamp [YYYY-MM-DD HH:mm:ss] em todos os logs para medições de benchmarking
+const _origLog = console.log;
+const _origWarn = console.warn;
+const _origError = console.error;
+function _getTimestamp() {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+console.log = function(...args) { _origLog(`[${_getTimestamp()}]`, ...args); };
+console.warn = function(...args) { _origWarn(`[${_getTimestamp()}]`, ...args); };
+console.error = function(...args) { _origError(`[${_getTimestamp()}]`, ...args); };
 const express = require('express');
 const http = require('http');
 const path = require('path');

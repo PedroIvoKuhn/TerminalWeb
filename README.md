@@ -47,7 +47,7 @@ Para rodar este projeto, você precisará configurar um arquivo `.env` na raiz d
 | `NGROK_AUTH` | Para conseguir testar na máquina local e o LTI precisa definir como `true` | `false` |
 | `PORT` | Porta em que o servidor Node.js vai rodar. | `3000` |
 | `DEFAULT_MPI_IMAGE` | Imagem Docker padrão usada para subir os nós do cluster. | `terminal-web:latest` |
-| `K8S_NAMESPACE` | Namespace do Kubernetes onde os pods serão criados. | `default` |
+| `K8S_NAMESPACE` | Namespace do Kubernetes onde os pods serão criados. | `terminal-web` |
 | `SESSION_SECRET` | Chave de criptografia para a sessão do Express. | `sua-chave-secreta` |
 | **Integração LTI (Moodle)** | *(Necessário apenas em `production`)* | |
 | `MONGO_DB_URI` | URI de conexão com o MongoDB (usado pelo pacote `ltijs`). | `mongodb://localhost/ltidb` |

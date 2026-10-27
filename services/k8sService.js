@@ -290,7 +290,7 @@ async function createClusterResources(clusterInfo) {
                 },
                 hostname: networkHostname,
                 subdomain: serviceName,
-                serviceAccountName: 'terminal-backend-sa',
+                automountServiceAccountToken: false,
                 containers: [{
                     name: 'container',
                     image: image,
