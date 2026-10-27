@@ -3,7 +3,7 @@
    ========================================= */
 /* Base compartilhada para TODOS os botões da aplicação */
 .btn-danger, .btn-extend-24h, .init-terminal, #btn-extend, #btn-ignore, 
-#btn-reload, #btn-salvar-novo, #btn-salvar-atual, .btn-primary, .btn-machine {
+#btn-reload, #btn-salvar-novo, #btn-salvar-atual, .btn-primary, .btn-machine, #btn-browse-file {
     color: white;
     border: none;
     border-radius: 4px;
@@ -14,7 +14,7 @@
 
 /* Tamanhos e Paddings específicos */
 .btn-danger, .btn-extend-24h { padding: 8px 12px; }
-#btn-salvar-novo             { padding: 8px 15px; }
+#btn-salvar-novo, #btn-browse-file { padding: 8px 15px; }
 #btn-salvar-atual            { padding: 6px 15px; }
 #btn-extend, #btn-ignore, #btn-reload, .btn-primary, #custom-modal-cancel {
     padding: 10px 20px;
@@ -75,8 +75,9 @@ button {
    2. CONTAINERS E PAINEIS
    ========================================= */
 /* Base compartilhada para os blocos de informação */
-#machine-info, #backup-ui {
-    width: 50%; 
+#machine-info, #backup-ui, #upload-ui {
+    flex: 1;
+    min-width: 250px;
     box-sizing: border-box;
     margin: 15px 0; 
     background: var(--cor-terminal); 
@@ -86,7 +87,17 @@ button {
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
 }
 
-#backup-ui { display: none; }
+#backup-ui, #upload-ui { display: none; }
+
+.extract-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.82em;
+    color: #ddd;
+    cursor: pointer;
+    user-select: none;
+}
 
 #setup-container {
     margin-top: 70px;
@@ -102,7 +113,8 @@ button {
     display: flex; 
     width: 100%; 
     height: 100%; 
-    gap: 10px;
+    gap: 12px;
+    flex-wrap: wrap;
 }
 
 #terminal-container {
@@ -111,6 +123,7 @@ button {
 }
 
 #terminal-wrapper {
+    position: relative;
     width: 100%;
     height: 80vh;
     background-color: var(--cor-terminal);
@@ -120,6 +133,36 @@ button {
     border: 1px solid var(--cinza-borda);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
     box-sizing: border-box;
+}
+
+.drag-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(15, 23, 42, 0.92);
+    backdrop-filter: blur(4px);
+    border: 3px dashed #3b82f6;
+    border-radius: 12px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+
+.drag-overlay.active {
+    display: flex;
+}
+
+.drag-overlay-box {
+    text-align: center;
+    color: #f8fafc;
+    padding: 30px 40px;
+    background: rgba(30, 41, 59, 0.95);
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 #terminal {
@@ -145,7 +188,7 @@ button {
 /* =========================================
    3. MODAIS
    ========================================= */
-#session-modal, #expired-modal, #custom-modal {
+#session-modal, #expired-modal, #custom-modal, #superseded-modal {
     display: none; 
     position: fixed; 
     top: 0; left: 0; 
@@ -189,13 +232,16 @@ input, #select-backup {
     cursor: pointer;
 }
 
-#nome-backup {
+#nome-backup, #upload-sub-dir {
     flex: 1;
     padding: 8px; 
     border-radius: 4px; 
     border: 1px solid var(--cinza-borda); 
     background: #111; 
     color: white;
+    font-family: inherit;
+    font-size: 0.9em;
+    box-sizing: border-box;
 }
 
 .input-backup {
@@ -234,7 +280,7 @@ input, #select-backup {
     margin-bottom: 15px;  
 }
 
-#status-cota {
+#status-cota, #upload-max-info {
     color: #aaa; 
     background: #222; 
     padding: 5px 10px; 
@@ -361,4 +407,10 @@ input, #select-backup {
     font-weight: bold;
     border: none;
     color: white;
+}
+
+#upload-feedback {
+    font-size: 0.82em;
+    color: var(--azul);
+    white-space: nowrap;
 }

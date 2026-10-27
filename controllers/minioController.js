@@ -1,6 +1,16 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const minioService = require('../services/minioService');
+const sessionService = require('../services/sessionService');
+
+const MAX_UPLOAD_SIZE_MB = parseInt(process.env.MAX_UPLOAD_SIZE_MB, 10) || 30;
+const MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024;
+
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: MAX_UPLOAD_SIZE_BYTES }
+});
 
 // Middleware
 const requireAuth = (req, res, next) => {
@@ -9,13 +19,64 @@ const requireAuth = (req, res, next) => {
     if ( !req.userId ) {
         return res.status(401).json({
             error: "Não autorizado: Sessão expirada ou inválida."
-        })
+        });
     }
 
     next();
-}
+};
 
 router.use(requireAuth);
+
+// Obter configurações de limites para o frontend
+router.get('/config', (req, res) => {
+    res.json({
+        maxUploadSizeMB: MAX_UPLOAD_SIZE_MB,
+        maxStudentStorageMB: parseInt(process.env.MAX_STUDENT_STORAGE_MB, 10) || 100
+    });
+});
+
+// Upload direto e injeção de arquivo/.zip no Pod
+router.post('/upload-to-pod', (req, res) => {
+    upload.single('file')(req, res, async (err) => {
+        if (err) {
+            if (err.code === 'LIMIT_FILE_SIZE') {
+                return res.status(400).json({
+                    error: `O arquivo enviado excede o tamanho máximo permitido de ${MAX_UPLOAD_SIZE_MB}MB.`
+                });
+            }
+            return res.status(400).json({ error: `Erro no upload: ${err.message}` });
+        }
+
+        try {
+            if (!req.file) {
+                return res.status(400).json({ error: "Nenhum arquivo enviado." });
+            }
+
+            const { podName, targetDir, extractZip } = req.body;
+            if (!podName) {
+                return res.status(400).json({ error: "Pod não especificado." });
+            }
+
+            // Validação de segurança: pod deve pertencer ao job do aluno
+            const isPodAllowed = sessionService.verifyUserPod(req.userId, podName);
+            if (!isPodAllowed) {
+                return res.status(403).json({ error: "Permissão negada para o Pod informado." });
+            }
+
+            const result = await minioService.uploadFileToPod({
+                podName,
+                targetDir: targetDir || '/home/aluno',
+                file: req.file,
+                extractZip: extractZip === 'true' || extractZip === true,
+                userId: req.userId
+            });
+
+            res.json(result);
+        } catch (error) {
+            res.status(400).json({ error: error.message });
+        }
+    });
+});
 
 // Listar Backups
 router.get('/backups', async (req, res) => {
@@ -38,7 +99,7 @@ router.post('/backups', async (req, res) => {
         const result = await minioService.saveBackup(req.userId, podName, fileName);
         res.json(result);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(400).json({ error: err.message });
     }
 });
 

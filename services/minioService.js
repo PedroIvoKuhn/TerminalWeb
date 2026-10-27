@@ -3,6 +3,7 @@ const stream = require('stream');
 const tar = require('tar-stream');
 const zlib = require('zlib');
 const path = require('path');
+const AdmZip = require('adm-zip');
 
 const k8sService = require('./k8sService');
 
@@ -16,15 +17,15 @@ const minioClient = new Minio.Client({
 });
 
 const BUCKET_NAME = 'arquivos-alunos';
-const MAX_SIZE_BYTES = 100 * 1024 * 1024; // 100 MB
+const MAX_STORAGE_MB = parseInt(process.env.MAX_STUDENT_STORAGE_MB, 10) || 100;
+const MAX_SIZE_BYTES = MAX_STORAGE_MB * 1024 * 1024;
 
 // Garante que o bucket existe
 minioClient.bucketExists(BUCKET_NAME, function(err, exists) {
-    if (err) return console.log(err);
+    if (err) return;
     if (!exists) {
         minioClient.makeBucket(BUCKET_NAME, 'us-east-1', function(err) {
-            if (err) return console.log('Erro criando bucket', err);
-            console.log('Bucket criado com sucesso.');
+            if (err) return;
         });
     }
 });
@@ -43,7 +44,7 @@ async function listFiles(userId) {
 async function checkQuota(userId) {
     const files = await listFiles(userId);
     const totalUsed = files.reduce((acc, curr) => acc + curr.size, 0);
-    return { totalUsed, permitted: totalUsed < MAX_SIZE_BYTES };
+    return { totalUsed, permitted: totalUsed < MAX_SIZE_BYTES, maxLimitBytes: MAX_SIZE_BYTES, maxLimitMB: MAX_STORAGE_MB };
 }
 
 async function deleteFile(userId, fullName) {
@@ -91,11 +92,20 @@ async function restoreBackup(userId, podName, fileName) {
 
 // --- SALVAR ---
 async function saveBackup(userId, podName, fileName) {
-    // 1. Checa cota
-    const { permitted } = await checkQuota(userId);
-    if (!permitted) throw new Error('Cota de 100MB excedida.');
+    // 1. Checa o tamanho do ambiente dentro do pod (/home/aluno)
+    const dirSizeMB = await k8sService.getPodDirectorySizeMB(podName, '/home/aluno');
+    if (dirSizeMB > MAX_STORAGE_MB) {
+        throw new Error(`O seu ambiente é muito grande (${dirSizeMB} MB) e excede o limite permitido de ${MAX_STORAGE_MB} MB. Não foi possível salvar o backup. Volte ao terminal para diminuir o volume excluindo arquivos desnecessários antes de salvar.`);
+    }
 
-    // 2. Segurança
+    // 2. Checa cota total de backups salvos no MinIO
+    const { totalUsed, permitted } = await checkQuota(userId);
+    if (!permitted) {
+        const usedMB = (totalUsed / (1024 * 1024)).toFixed(1);
+        throw new Error(`A sua cota de armazenamento (${usedMB} MB) atingiu o limite de ${MAX_STORAGE_MB} MB. Exclua backups antigos para liberar espaço antes de salvar.`);
+    }
+
+    // 3. Segurança do nome
     if (typeof fileName !== 'string' || !fileName.trim()) throw new Error("Nome inválido");
     const safeName = path.basename(fileName); 
     
@@ -127,12 +137,98 @@ async function saveBackup(userId, podName, fileName) {
         );
         const uploadPromise = minioClient.putObject(BUCKET_NAME, finalName, passThrough);
     
-        await Promise.all([execPromise, uploadPromise]); // Espera as duas promessas trabalharem em conjunto
+        await Promise.all([execPromise, uploadPromise]);
         return { message: "Salvo com sucesso!", arquivo: finalName };
     } catch (err) {
         console.error("Erro no fluxo do backup:", err);
-        throw new Error("Falha ao salvar backup no storage.");
+        throw new Error(err.message.includes('ambiente') || err.message.includes('cota') ? err.message : "Falha ao salvar backup no storage.");
     }
+}
+
+async function uploadFileToPod({ podName, targetDir, file, extractZip, userId }) {
+    // 1. Sanitização do diretório de destino (diretório mínimo estrito é /home/aluno)
+    let cleanDir = path.posix.normalize((targetDir || '/home/aluno').trim());
+    if (cleanDir !== '/home/aluno' && !cleanDir.startsWith('/home/aluno/')) {
+        cleanDir = path.posix.join('/home/aluno', cleanDir.replace(/^(\.\.[\/\\])+/, '').replace(/^\/+/, ''));
+    }
+    if (cleanDir === '/home/aluno/.ssh' || cleanDir.startsWith('/home/aluno/.ssh/')) {
+        throw new Error("Não é permitido enviar arquivos para o diretório de chaves .ssh.");
+    }
+
+    const isZip = file.originalname.toLowerCase().endsWith('.zip');
+    const pack = tar.pack();
+
+    if (isZip && extractZip) {
+        let zip;
+        try {
+            zip = new AdmZip(file.buffer);
+        } catch (e) {
+            throw new Error("Arquivo ZIP inválido ou corrompido.");
+        }
+
+        const entries = zip.getEntries();
+        let totalUncompressedSize = 0;
+        const MAX_UNCOMPRESSED_BYTES = MAX_STORAGE_MB * 1024 * 1024;
+
+        if (entries.length > 2000) {
+            throw new Error("O arquivo ZIP contém muitos arquivos (limite máximo de 2000 arquivos).");
+        }
+
+        for (const entry of entries) {
+            const entryName = entry.entryName.replace(/\\/g, '/');
+            // Proteção contra Zip Slip
+            if (entryName.includes('..') || path.posix.isAbsolute(entryName)) {
+                throw new Error("O arquivo ZIP contém caminhos inválidos ou inseguros (Zip Slip detectado).");
+            }
+            if (entryName.startsWith('.ssh/') || entryName === '.ssh') {
+                continue;
+            }
+
+            if (entry.isDirectory) {
+                pack.entry({
+                    name: entryName,
+                    type: 'directory',
+                    mode: 0o755
+                });
+            } else {
+                totalUncompressedSize += entry.header.size;
+                if (totalUncompressedSize > MAX_UNCOMPRESSED_BYTES) {
+                    throw new Error(`O conteúdo descompactado do ZIP (${(totalUncompressedSize / 1024 / 1024).toFixed(1)} MB) excede o limite permitido de ${MAX_STORAGE_MB} MB.`);
+                }
+                const data = entry.getData();
+                pack.entry({
+                    name: entryName,
+                    size: data.length,
+                    mode: 0o644
+                }, data);
+            }
+        }
+    } else {
+        const safeName = path.basename(file.originalname);
+        pack.entry({
+            name: safeName,
+            size: file.buffer.length,
+            mode: 0o644
+        }, file.buffer);
+    }
+
+    pack.finalize();
+
+    // 2. Injeta no pod
+    await k8sService.injectTarStreamToPod(podName, cleanDir, pack);
+
+    // Ajusta permissões dos arquivos para o aluno
+    await k8sService.execPodSimpleCommand(podName, ['chown', '-R', 'aluno:aluno', cleanDir]);
+
+    return {
+        success: true,
+        message: isZip && extractZip 
+            ? `Arquivo ZIP descompactado com sucesso em "${cleanDir}"!` 
+            : `Arquivo "${file.originalname}" salvo com sucesso em "${cleanDir}"!`,
+        targetDir: cleanDir,
+        fileName: file.originalname,
+        extracted: isZip && extractZip
+    };
 }
 
 async function getFileForDownload(userId, fileName) {
@@ -264,5 +360,7 @@ module.exports = {
     getFileForDownload, 
     listContentBackup, 
     downloadInternalFile, 
-    downloadInternalFolder 
+    downloadInternalFolder,
+    uploadFileToPod,
+    checkQuota
 };

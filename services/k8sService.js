@@ -1,4 +1,5 @@
 const k8s = require('@kubernetes/client-node');
+const stream = require('stream');
 const { k8sApi, namespace, kc, k8sExec } = require('../config/kubernetes');
 
 // --  Funções privadas
@@ -82,7 +83,7 @@ async function waitForPodRunning(name) {
 }
 
 async function createClusterResources(clusterInfo) {
-    const { jobId, image, keys, expiresAt, numMachines, userId, activeBackupName } = clusterInfo;
+    const { jobId, image, keys, expiresAt, numMachines, userId, platformId, activeBackupName } = clusterInfo;
     const masterPodName = `master-${jobId}`;
     const serviceName = `svc-${jobId}`;
     const secretName = `ssh-keys-${jobId}`;
@@ -92,8 +93,7 @@ async function createClusterResources(clusterInfo) {
         await k8sApi.deleteNamespacedSecret(secretName, namespace);
         await k8sApi.deleteNamespacedService(serviceName, namespace);
     } catch (e) {
-        // Ignora erro 404 (Not Found), qualquer outro erro mostra no log
-        if (e.body && e.body.code !== 404) console.log("Aviso de limpeza:", e.body.message);
+        // Ignora erros na limpeza preventiva
     }
 
     // Cria o secret
@@ -123,7 +123,8 @@ async function createClusterResources(clusterInfo) {
                   'terminalWeb/expiresAt': expiresAt.toString(),
                   'terminalWeb/numMachines': numMachines.toString(),
                   'terminalWeb/userId': userId.toString(),
-                  'terminalWeb/activeBackupName': activeBackupName.toString(),
+                  'terminalWeb/platformId': (platformId || 'moodle').toString(),
+                  'terminalWeb/activeBackupName': (activeBackupName || '').toString(),
                 }
             },
             spec: {
@@ -132,7 +133,7 @@ async function createClusterResources(clusterInfo) {
                 },
                 hostname: networkHostname,
                 subdomain: serviceName,
-                serviceAccountName: 'terminal-backend-sa',
+                automountServiceAccountToken: false,
                 containers: [{
                     name: 'container',
                     image: image,
@@ -236,6 +237,7 @@ async function getActiveJobs() {
       const expiresAtStr = annotations["terminalWeb/expiresAt"];
       const numMachinesStr =  annotations["terminalWeb/numMachines"];
       const userId = annotations["terminalWeb/userId"];
+      const platformId = annotations["terminalWeb/platformId"] || 'moodle';
       const activeBackupName = annotations["terminalWeb/activeBackupName"];
 
       if (jobId && expiresAtStr) {
@@ -244,6 +246,7 @@ async function getActiveJobs() {
           expiresAt: parseInt(expiresAtStr, 10),
           numMachines: parseInt(numMachinesStr, 10) || 2,
           userId: userId,
+          platformId: platformId,
           activeBackupName: activeBackupName,
         })
       }
@@ -279,8 +282,6 @@ async function updateJobExpiration(jobId, newExpiresAt) {
             undefined, undefined, undefined, undefined, undefined, 
             options
         );
-        
-        console.log(`[K8s] Annotation atualizada com sucesso para o Job ${jobId}`);
     } catch (err) {
         console.error(`[ERRO K8s] Falha ao atualizar a expiração do Job ${jobId}:`, err);
     }
@@ -306,6 +307,149 @@ async function connectPodToTerminal(
     );
 }
 
+async function execPodSimpleCommand(podName, command) {
+    return new Promise(async (resolve) => {
+        let done = false;
+        const finish = (result) => {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            resolve(result);
+        };
+
+        const timer = setTimeout(() => finish(null), 5000);
+
+        try {
+            const ws = await k8sExec.exec(
+                namespace,
+                podName,
+                'container',
+                command,
+                null,
+                process.stderr,
+                null,
+                false,
+                (status) => finish(status)
+            );
+            if (ws) {
+                if (typeof ws.on === 'function') {
+                    ws.on('close', () => finish(true));
+                }
+                ws.onclose = () => finish(true);
+            }
+        } catch (err) {
+            console.error(`[k8s] Erro ao executar comando simples no pod ${podName}:`, err.message);
+            finish(null);
+        }
+    });
+}
+
+async function injectTarStreamToPod(podName, targetDir, tarStream) {
+    // 1. Garante que o diretório de destino exista
+    await execPodSimpleCommand(podName, ['mkdir', '-p', targetDir]);
+
+    return new Promise(async (resolve, reject) => {
+        let settled = false;
+        const finish = (err) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            if (err) reject(err);
+            else resolve();
+        };
+
+        const timer = setTimeout(() => {
+            finish(null);
+        }, 30000);
+
+        try {
+            const stderrStream = new stream.PassThrough();
+            let stderrData = '';
+            stderrStream.on('data', chunk => { stderrData += chunk.toString(); });
+
+            const ws = await k8sExec.exec(
+                namespace,
+                podName,
+                'container',
+                ['tar', 'xf', '-', '-C', targetDir],
+                process.stdout,
+                stderrStream,
+                tarStream,
+                false,
+                (status) => {
+                    if (status && status.status === 'Failure') {
+                        finish(new Error(status.message || stderrData || 'Falha ao descompactar arquivos no pod.'));
+                    } else {
+                        finish(null);
+                    }
+                }
+            );
+
+            if (ws) {
+                ws.onerror = (err) => finish(err);
+                const handleClose = () => {
+                    if (stderrData && stderrData.toLowerCase().includes('error')) {
+                        finish(new Error(stderrData.trim()));
+                    } else {
+                        finish(null);
+                    }
+                };
+                if (typeof ws.on === 'function') {
+                    ws.on('close', handleClose);
+                }
+                ws.onclose = handleClose;
+            }
+        } catch (err) {
+            console.error(`[k8s] Erro ao injetar tar stream no pod ${podName}:`, err);
+            finish(err);
+        }
+    });
+}
+
+async function getPodDirectorySizeMB(podName, dir = '/home/aluno') {
+    return new Promise(async (resolve) => {
+        const stdoutStream = new stream.PassThrough();
+        let output = '';
+        stdoutStream.on('data', chunk => {
+            output += chunk.toString();
+        });
+
+        const timer = setTimeout(() => {
+            resolve(0);
+        }, 5000);
+
+        try {
+            const ws = await k8sExec.exec(
+                namespace,
+                podName,
+                'container',
+                ['du', '-sm', dir],
+                stdoutStream,
+                process.stderr,
+                null,
+                false,
+                () => {
+                    clearTimeout(timer);
+                    const parts = output.trim().split(/\s+/);
+                    const sizeMB = parseInt(parts[0], 10);
+                    resolve(!isNaN(sizeMB) ? sizeMB : 0);
+                }
+            );
+
+            if (ws) {
+                ws.onerror = () => {
+                    clearTimeout(timer);
+                    resolve(0);
+                };
+            }
+        } catch (err) {
+            clearTimeout(timer);
+            console.error(`[k8s] Erro ao obter tamanho do diretório no pod ${podName}:`, err.message);
+            resolve(0);
+        }
+    });
+}
+
 module.exports = { 
     waitForPodRunning, 
     cleanupJob, 
@@ -313,4 +457,7 @@ module.exports = {
     getActiveJobs, 
     updateJobExpiration,
     connectPodToTerminal,
+    execPodSimpleCommand,
+    injectTarStreamToPod,
+    getPodDirectorySizeMB,
 };

@@ -13,19 +13,19 @@ const WARNING_BEFORE = 20 * 60 * 1000;        // 20 Minutos antes de acabar
 // Armazena os timers ativos: { jobId: { killTimer, warnTimer, expiresAt } }
 const activeSessions = {};
 
-function startSession(jobId, socket, numMachines, userId, backupName) {
+function startSession(jobId, socket, numMachines, userId, backupName, platformId = 'moodle') {
     const now = Date.now();
     const expiresAt = now + INITIAL_DURATION;
     
-    console.log(`[SESSION] Iniciando monitoramento para ${jobId}. Expira em: ${new Date(expiresAt).toLocaleTimeString()}`);
-
     // Salva os dados da sessão
     activeSessions[jobId] = {
         sockets: new Set([socket]),
         numMachines: numMachines,
         expiresAt: expiresAt,
         userId: userId,
+        platformId: platformId || 'moodle',
         activeBackupName: backupName,
+        terminals: {}, // armazena { execWs, buffer, disconnectTimer } por máquina
         // 1. Timer do Aviso
         warnTimer: setTimeout(() => {
             sendWarning(jobId);
@@ -42,7 +42,6 @@ function startSession(jobId, socket, numMachines, userId, backupName) {
 function sendWarning(jobId) {
   const session = activeSessions[jobId];
   if (session && session.sockets) {
-    console.log(`[SESSION] Enviando aviso de expiração para ${jobId}`);
     session.sockets.forEach(socket => {
       socket.emit("session:warning");
     });
@@ -52,8 +51,6 @@ function sendWarning(jobId) {
 async function extendSession(jobId, timeExtend) {
     const session = activeSessions[jobId];
     if (!session) return false;
-
-    console.log(`[SESSION] Estendendo sessão ${jobId}`);
 
     // 1. Limpa os timers antigos para não dispararem errado
     clearTimeout(session.warnTimer);
@@ -99,8 +96,8 @@ function restoreSession(jobId, newSocket) {
     return { expiresAt, numMachines };
 }
 
-async function terminateSession(jobId) {
-    const session = activeSessions[jobId];
+async function terminateSession(jobId, fallbackSession = null) {
+    const session = activeSessions[jobId] || fallbackSession;
     if (session && session.sockets) {
       session.sockets.forEach(socket => {
         socket.emit('session:expired');
@@ -112,18 +109,15 @@ async function terminateSession(jobId) {
         const secretName = `ssh-keys-${jobId}`;
         const masterPodName = `master-${jobId}`;
 
-        if (session.userId && session.activeBackupName && masterPodName) {
-          console.log(`[Auto-Save] Salvando automaticamente em: ${session.activeBackupName}`);
+        if (session && session.userId && session.activeBackupName && masterPodName) {
           try {
             await minioService.saveBackup(session.userId, masterPodName, session.activeBackupName);
-            console.log(`[Auto-Save] Sucesso!`);
           } catch (err) {
             console.error(`[Auto-Save] Falha ao salvar no encerramento:`, err.message);
           }
         }
 
         await k8sService.cleanupJob(jobId, secretName);
-        console.log(`[SESSION] K8s limpo com sucesso para ${jobId}.`);
     } catch (err) {
         console.error(`[ERRO] Falha ao limpar K8s do job ${jobId}:`, err);
     }
@@ -135,6 +129,14 @@ function clearSession(jobId) {
     if (activeSessions[jobId]) {
         clearTimeout(activeSessions[jobId].warnTimer);
         clearTimeout(activeSessions[jobId].killTimer);
+        if (activeSessions[jobId].terminals) {
+            for (const key of Object.keys(activeSessions[jobId].terminals)) {
+                const termEntry = activeSessions[jobId].terminals[key];
+                if (termEntry && termEntry.execWs) {
+                    try { termEntry.execWs.close(); } catch (e) {}
+                }
+            }
+        }
         delete activeSessions[jobId];
     }
 }
@@ -145,17 +147,17 @@ async function syncSessionsK8s() {
   for (const session of sessionsK8s) {
     const timeLeft = session.expiresAt - Date.now();
     if (timeLeft <= 0) {
-      terminateSession(session.jobId);
+      await terminateSession(session.jobId, session);
     } else {
-      console.log(`[SYNC] Restaurando sessões`);
-      
       const warnTimeLeft = timeLeft - WARNING_BEFORE; 
       
       activeSessions[session.jobId] = {
         expiresAt: session.expiresAt,
         numMachines: session.numMachines,
         userId: session.userId,
+        platformId: session.platformId || 'moodle',
         activeBackupName: session.activeBackupName,
+        terminals: {},
         sockets: new Set(),
         
         killTimer: setTimeout(() => {
@@ -167,8 +169,8 @@ async function syncSessionsK8s() {
               sendWarning(session.jobId); 
             }, warnTimeLeft)
           : setTimeout(() => {
-              sendWarning(session.jobId);
-            }, null)
+              sendWarning(session.jobId); 
+            }, 0)
       };
     }
   }
@@ -181,4 +183,72 @@ function removeSocket(jobId, socketToRemove) {
   }
 }
 
-module.exports = { startSession, extendSession, restoreSession, terminateSession, syncSessionsK8s, removeSocket };
+function getSessionByUserId(userId, platformId = null) {
+  if (!userId) return null;
+  const userIdStr = String(userId);
+  for (const [jobId, session] of Object.entries(activeSessions)) {
+    if (session.userId && String(session.userId) === userIdStr) {
+      if (platformId && session.platformId && String(session.platformId) !== String(platformId)) {
+        continue;
+      }
+      return { jobId, ...session };
+    }
+  }
+  return null;
+}
+
+function verifyUserPod(userId, podName) {
+  if (process.env.NODE_ENV === 'development' && (!userId || userId === 'devUser')) {
+    return true;
+  }
+  if (!userId || !podName) return false;
+
+  for (const [jobId, session] of Object.entries(activeSessions)) {
+    if (String(session.userId) === String(userId)) {
+      if (podName.includes(jobId) || podName === `master-${jobId}` || podName.startsWith(`worker-`)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function getTerminal(jobId, machine = 'master') {
+  const session = activeSessions[jobId];
+  if (!session) return null;
+  if (!session.terminals) session.terminals = {};
+  return session.terminals[machine] || null;
+}
+
+function setTerminal(jobId, machine = 'master', termEntry) {
+  const session = activeSessions[jobId];
+  if (!session) return;
+  if (!session.terminals) session.terminals = {};
+  session.terminals[machine] = termEntry;
+}
+
+function appendTerminalBuffer(jobId, machine = 'master', text) {
+  const session = activeSessions[jobId];
+  if (!session) return;
+  if (!session.terminals) session.terminals = {};
+  if (!session.terminals[machine]) {
+    session.terminals[machine] = { execWs: null, buffer: '' };
+  }
+  const current = session.terminals[machine].buffer || '';
+  // Mantém no máximo os últimos 200KB (~3000 linhas de histórico/processos)
+  session.terminals[machine].buffer = (current + text).slice(-200000);
+}
+
+module.exports = { 
+  startSession, 
+  extendSession, 
+  restoreSession, 
+  terminateSession, 
+  syncSessionsK8s, 
+  removeSocket, 
+  verifyUserPod, 
+  getSessionByUserId,
+  getTerminal,
+  setTerminal,
+  appendTerminalBuffer
+};

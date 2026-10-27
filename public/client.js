@@ -9,10 +9,23 @@ const setupForm = document.getElementById('setup-form');
 const numMachinesInput = document.getElementById('num-machines');
 
 let myMasterPodName = null;
-let currentLoadedBackup = localStorage.getItem('active_backup_name') || null;;
+let currentLoadedBackup = localStorage.getItem('active_backup_name') || null;
+let maxUploadSizeMB = window.MAX_UPLOAD_SIZE_MB || 30;
+let maxStudentStorageMB = window.MAX_STUDENT_STORAGE_MB || 100;
+let currentWorkingDir = '/home/aluno';
 const selectBackup = document.getElementById('select-backup');
 
 let cacheArquivos = {}; 
+
+// Sincroniza limites vindos da API
+fetch('/api/config')
+    .then(r => r.json())
+    .then(cfg => {
+        if (cfg.maxUploadSizeMB) maxUploadSizeMB = cfg.maxUploadSizeMB;
+        if (cfg.maxStudentStorageMB) maxStudentStorageMB = cfg.maxStudentStorageMB;
+        updateUploadLimitDisplay();
+    })
+    .catch(() => {});
 
 document.addEventListener('DOMContentLoaded', () => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -35,7 +48,7 @@ const term = new Terminal({
     theme: {
         background: '#1e1e1e', // Fundo que combina com seu CSS
         foreground: '#f8f8f2', // Texto padrão (quase branco)
-        cursor: '#50fa7b',     // Cursor piscando em verde neon
+        cursor: '#f8f8f2',     // Cursor neutro
         cursorAccent: '#1e1e1e',
         selectionBackground: '#44475a',
         black: '#21222c',
@@ -59,6 +72,61 @@ const term = new Terminal({
 const fitAddon = new FitAddon.FitAddon();
 term.loadAddon(fitAddon);
 
+// --- Atalhos de Teclado Inteligentes (Método 1: Copiar / Colar / Interromper) ---
+term.attachCustomKeyEventHandler((event) => {
+    if (event.type !== 'keydown') return true;
+
+    const isCtrlOrCmd = event.ctrlKey || event.metaKey;
+
+    // 1. Ctrl+C ou Ctrl+Shift+C
+    if (isCtrlOrCmd && (event.key === 'c' || event.key === 'C')) {
+        // Se houver texto selecionado no terminal: copia para a Área de Transferência
+        if (term.hasSelection()) {
+            const selectedText = term.getSelection();
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(selectedText).catch(() => {});
+            }
+            if (event.shiftKey) event.preventDefault();
+            // Retorna false para NÃO enviar \x03 (SIGINT) e não matar o processo em execução no pod
+            return false;
+        }
+
+        // Se for Ctrl+Shift+C sem seleção, impede o navegador de abrir o Inspecionar Elemento (DevTools)
+        if (event.shiftKey) {
+            event.preventDefault();
+            return false;
+        }
+
+        // Sem seleção e apenas Ctrl+C: envia SIGINT (\x03) normalmente para cancelar comandos no bash
+        return true;
+    }
+
+    // 2. Ctrl+V ou Ctrl+Shift+V
+    if (isCtrlOrCmd && (event.key === 'v' || event.key === 'V')) {
+        if (event.shiftKey) event.preventDefault();
+
+        if (navigator.clipboard && navigator.clipboard.readText) {
+            navigator.clipboard.readText().then((text) => {
+                if (text) {
+                    socket.emit('input', text);
+                }
+            }).catch(() => {});
+            return false;
+        }
+        return true;
+    }
+
+    return true;
+});
+
+
+function updateUploadLimitDisplay() {
+    const infoLbl = document.getElementById('upload-max-info');
+    const dragMaxLbl = document.getElementById('drag-max-info');
+    if (infoLbl) infoLbl.textContent = `Máx: ${maxUploadSizeMB} MB`;
+    if (dragMaxLbl) dragMaxLbl.textContent = `Tamanho máximo: ${maxUploadSizeMB} MB`;
+}
+
 // --- Inicializando terminal ---
 setupForm.addEventListener('submit', (e) => {
     e.preventDefault(); 
@@ -75,17 +143,27 @@ setupForm.addEventListener('submit', (e) => {
     }
 });
 
+let isTerminalInitialized = false;
+
 function initializeTerminal() {
+    if (isTerminalInitialized) return;
+    isTerminalInitialized = true;
+
     setupContainer.style.display = 'none';
     terminalContainer.style.display = 'block';
 
     term.open(document.getElementById('terminal'));
+    term.reset();
 
     term.onResize((size) => {
         socket.emit('resize', { cols: size.cols, rows: size.rows });
     });
 
-    fitAddon.fit();
+    setTimeout(() => {
+        fitAddon.fit();
+        socket.emit('resize', { cols: term.cols, rows: term.rows });
+    }, 150);
+
     window.addEventListener('resize', () => fitAddon.fit());
 }
 
@@ -340,7 +418,7 @@ async function loadBackups() {
             totalSize += arq.size;
         });
         
-        if(statusLbl) statusLbl.innerText = `Uso: ${(totalSize/1024/1024).toFixed(2)} / 100 MB`;
+        if(statusLbl) statusLbl.innerText = `Uso: ${(totalSize/1024/1024).toFixed(2)} / ${maxStudentStorageMB} MB`;
 
     } catch (e) {
         console.error("Erro cota", e);
@@ -529,6 +607,12 @@ socket.on('session-ready', (data) => {
             updateBackupUI();
             loadBackups();
         }
+
+        const uploadUi = document.getElementById('upload-ui');
+        if(uploadUi) {
+            uploadUi.style.display = 'block';
+            updateUploadLimitDisplay();
+        }
     }
 
     const machineRaw = urlParams.get('machine') || 'Master';
@@ -570,8 +654,44 @@ socket.on('session:expired', () => {
     timerBar.style.display = 'none';
     localStorage.removeItem("jobId");
     localStorage.removeItem('active_backup_name');
+    isRestoringSession = false;
+    isTerminalInitialized = false;
     document.getElementById('expired-modal').style.display = 'flex';
 });
+
+let isSuperseded = false;
+
+socket.on('session:superseded', (data) => {
+    isSuperseded = true;
+    if (socket && socket.io) {
+        socket.io.opts.reconnection = false;
+    }
+    socket.disconnect();
+
+    clearInterval(countdownInterval);
+    const timerBar = document.getElementById('timer-bar');
+    if (timerBar) timerBar.style.display = 'none';
+
+    if (sessionModal) sessionModal.style.display = 'none';
+    const expiredModal = document.getElementById('expired-modal');
+    if (expiredModal) expiredModal.style.display = 'none';
+
+    const supersededModal = document.getElementById('superseded-modal');
+    if (supersededModal) {
+        if (data && data.message) {
+            const msgEl = document.getElementById('superseded-message');
+            if (msgEl) msgEl.innerHTML = data.message;
+        }
+        supersededModal.style.display = 'flex';
+    }
+});
+
+const btnReconnectHere = document.getElementById('btn-reconnect-here');
+if (btnReconnectHere) {
+    btnReconnectHere.addEventListener('click', () => {
+        window.location.reload();
+    });
+}
 
 // --- BOTÕES ---
 document.getElementById('btn-extend').addEventListener('click', (e) => {
@@ -591,6 +711,8 @@ document.getElementById('btn-reload').addEventListener('click', () => {
 });
 
 document.getElementById('btn-kill-session').addEventListener('click', () => {
+    isRestoringSession = false;
+    isTerminalInitialized = false;
     socket.emit("kill-session");
 });
 
@@ -601,13 +723,30 @@ document.getElementById('btn-extend-24h').addEventListener('click', (e) => {
 });
 
 // --- EVENTOS DA SESSÃO ---
-const jobId = localStorage.getItem("jobId");
-if(jobId) {
+let isRestoringSession = false;
+
+function restoreActiveSession(jobIdToRestore) {
+    if (!jobIdToRestore || isRestoringSession || isSuperseded) return;
+    isRestoringSession = true;
+
+    localStorage.setItem("jobId", jobIdToRestore);
     initializeTerminal();
     socket.emit("restore-session", { 
-    jobId: jobId,
-    machine: targetMachine,
-  });
+        jobId: jobIdToRestore,
+        machine: targetMachine,
+    });
+}
+
+// O servidor notifica se este aluno já possui sessão ativa no cluster (em qualquer computador/navegador)
+socket.on('session:active-found', (data) => {
+    if (isSuperseded) return;
+    restoreActiveSession(data.jobId);
+});
+
+// Fallback se o navegador já tiver o jobId em cache local
+const localSavedJobId = localStorage.getItem("jobId");
+if (localSavedJobId) {
+    restoreActiveSession(localSavedJobId);
 }
 
 // --- CONTROLADOR DE MODAL DINÂMICO ---
@@ -660,3 +799,157 @@ const AppModal = {
     alert: (title, message) => AppModal.show({ title, message, type: 'alert' }),
     confirm: (title, message) => AppModal.show({ title, message, type: 'confirm', confirmText: 'Sim', cancelText: 'Não' })
 };
+
+// =========================================
+// 5. UPLOAD E INJEÇÃO DE ARQUIVOS NO POD
+// =========================================
+function getActivePodName() {
+    const currentJobId = localStorage.getItem("jobId");
+    if (!currentJobId) return myMasterPodName;
+    return targetMachine === 'master' ? `master-${currentJobId}` : `${targetMachine}-${currentJobId}`;
+}
+
+function getTargetDirectory() {
+    const input = document.getElementById('upload-sub-dir');
+    let sub = input ? input.value.trim() : '';
+    sub = sub.replace(/^[\/\\]+/, '').replace(/[\/\\]+$/, '').replace(/\.\./g, '').trim();
+    if (!sub) return '/home/aluno';
+    return `/home/aluno/${sub}`;
+}
+
+async function uploadSelectedFile(file) {
+    if (!file) return;
+
+    const maxBytes = maxUploadSizeMB * 1024 * 1024;
+    if (file.size > maxBytes) {
+        const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+        AppModal.alert(
+            'Arquivo Muito Grande',
+            `O arquivo <b>"${file.name}"</b> possui <b>${sizeMB} MB</b>.<br><br>` +
+            `O tamanho máximo permitido para upload é de <b>${maxUploadSizeMB} MB</b>.<br>` +
+            `Reduza o tamanho do arquivo ou .zip antes de tentar enviar novamente.`
+        );
+        return;
+    }
+
+    const podName = getActivePodName();
+    if (!podName) {
+        AppModal.alert('Erro', 'O terminal ainda não está conectado a um Pod.');
+        return;
+    }
+
+    const targetDir = getTargetDirectory();
+    const isZip = file.name.toLowerCase().endsWith('.zip');
+    const chkExtract = document.getElementById('chk-extract-zip');
+    const shouldExtract = isZip && chkExtract ? chkExtract.checked : false;
+
+    const feedback = document.getElementById('upload-feedback');
+    const btnBrowse = document.getElementById('btn-browse-file');
+
+    if (feedback) {
+        feedback.style.display = 'inline-block';
+        feedback.textContent = 'Enviando...';
+        feedback.style.color = 'var(--azul)';
+    }
+    if (btnBrowse) {
+        btnBrowse.disabled = true;
+        btnBrowse.textContent = 'Enviando...';
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('podName', podName);
+    formData.append('targetDir', targetDir);
+    formData.append('extractZip', shouldExtract);
+
+    try {
+        const res = await fetch('/api/upload-to-pod', {
+            method: 'POST',
+            body: formData
+        });
+        const json = await res.json();
+
+        if (!res.ok || json.error) {
+            AppModal.alert('Atenção no Upload', json.error || 'Ocorreu um erro ao enviar o arquivo.');
+        } else {
+            term.write(`\r\n✔ [Upload Concluído]: "${file.name}" para ${targetDir}\r\n`);
+        }
+    } catch (err) {
+        AppModal.alert('Erro de Conexão', 'Não foi possível conectar ao servidor para enviar o arquivo.');
+    } finally {
+        if (feedback) {
+            feedback.style.display = 'none';
+            feedback.textContent = '';
+        }
+        if (btnBrowse) {
+            btnBrowse.disabled = false;
+            btnBrowse.textContent = 'Buscar nos arquivos';
+        }
+        const fileInput = document.getElementById('file-input-upload');
+        if (fileInput) fileInput.value = '';
+    }
+}
+
+// Botão de Selecionar Arquivos do PC
+const btnBrowseFile = document.getElementById('btn-browse-file');
+const fileInputUpload = document.getElementById('file-input-upload');
+if (btnBrowseFile && fileInputUpload) {
+    btnBrowseFile.addEventListener('click', () => {
+        fileInputUpload.value = '';
+        fileInputUpload.click();
+    });
+    fileInputUpload.addEventListener('change', () => {
+        if (fileInputUpload.files && fileInputUpload.files.length > 0) {
+            uploadSelectedFile(fileInputUpload.files[0]);
+        }
+    });
+}
+
+// Sincroniza o input de destino com o overlay de drag
+const subDirInput = document.getElementById('upload-sub-dir');
+if (subDirInput) {
+    subDirInput.addEventListener('input', () => {
+        const dragCwd = document.getElementById('drag-cwd-target');
+        if (dragCwd) dragCwd.textContent = getTargetDirectory();
+    });
+}
+
+// Drag & Drop no Terminal Wrapper
+const termWrapper = document.getElementById('terminal-wrapper');
+const dragOverlay = document.getElementById('terminal-drag-overlay');
+let dragCounter = 0;
+
+if (termWrapper && dragOverlay) {
+    termWrapper.addEventListener('dragenter', (e) => {
+        e.preventDefault();
+        dragCounter++;
+        const dragCwd = document.getElementById('drag-cwd-target');
+        if (dragCwd) dragCwd.textContent = getTargetDirectory();
+        dragOverlay.classList.add('active');
+    });
+
+    termWrapper.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+    });
+
+    termWrapper.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        dragCounter--;
+        if (dragCounter <= 0) {
+            dragCounter = 0;
+            dragOverlay.classList.remove('active');
+        }
+    });
+
+    termWrapper.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dragCounter = 0;
+        dragOverlay.classList.remove('active');
+
+        const files = e.dataTransfer.files;
+        if (files && files.length > 0) {
+            uploadSelectedFile(files[0]);
+        }
+    });
+}

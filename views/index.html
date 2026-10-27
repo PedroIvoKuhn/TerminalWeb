@@ -83,8 +83,41 @@
                     </button>
                 </div>
             </div>
+
+            <div id="upload-ui">
+                <div class="backup-container">
+                    <h3 style="margin: 0; font-size: 1.1em;"> 📤 Injetar Arquivos</h3>
+                    <small id="upload-max-info">
+                        Máx: 30 MB
+                    </small>
+                </div>
+
+                <div class="input-backup">
+                    <input type="text" id="upload-sub-dir" placeholder="Pasta de destino..." title="Pasta de destino">
+                    <input type="file" id="file-input-upload" style="display: none;">
+                    <button id="btn-browse-file" class="btn-primary" style="white-space: nowrap;">
+                        Buscar nos arquivos
+                    </button>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+                    <label class="extract-checkbox-label" style="margin-top: 0;">
+                        <input type="checkbox" id="chk-extract-zip" checked>
+                        <span>Descompactar se for .zip</span>
+                    </label>
+                    <small id="upload-feedback" style="display: none;"></small>
+                </div>
+            </div>
         </div>
         <div id="terminal-wrapper">
+            <div id="terminal-drag-overlay" class="drag-overlay">
+                <div class="drag-overlay-box">
+                    <span style="font-size: 3em; display: block; margin-bottom: 8px;">📥</span>
+                    <h3 style="margin: 0 0 8px 0; color: #fff;">Solte o arquivo ou .zip aqui</h3>
+                    <p style="margin: 0 0 8px 0; color: #ccc;">Injetar em: <strong id="drag-cwd-target" style="color: #f1f1f1; font-weight: bold;">/home/aluno</strong></p>
+                    <small id="drag-max-info" style="color: #94a3b8; font-size: 0.9em;">Tamanho máximo: 30 MB</small>
+                </div>
+            </div>
             <div id="terminal"></div>
         </div>
     </div>
@@ -111,6 +144,19 @@
             <p>A sua sessão chegou ao fim.</p>
             <button id="btn-reload" class="btn-primary">
                 Voltar ao Início
+            </button>
+        </div>
+    </div>
+
+    <div id="superseded-modal">
+        <div class="expired-content">
+            <h2>⚠️ Conexão Encerrada</h2>
+            <p id="superseded-message" style="margin: 20px 0; color: #ddd; line-height: 1.5;">
+                Nova aba aberta em outro local.<br>
+                A conexão atual foi encerrada.
+            </p>
+            <button id="btn-reconnect-here" class="btn-primary">
+                Reconectar Aqui
             </button>
         </div>
     </div>

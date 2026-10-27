@@ -4,7 +4,7 @@ const lti = require('ltijs').Provider;
 
 // Função privada
 
-function renderTemplate(res, userName, image, ltiToken) {
+function renderTemplate(res, userName, image, ltiToken, userId = '', platformId = '') {
     const templatePath = path.join(__dirname, '../views', 'index.html');
 
     fs.readFile(templatePath, 'utf8', (err, html) => {
@@ -12,8 +12,18 @@ function renderTemplate(res, userName, image, ltiToken) {
 
         let finalHtml = html.replace('{{NOME_USUARIO}}', userName);
         finalHtml = finalHtml.replaceAll('{{IMAGE}}', image);
+        finalHtml = finalHtml.replaceAll('{{USER_ID}}', userId);
+        finalHtml = finalHtml.replaceAll('{{PLATFORM_ID}}', platformId);
 
-        const scriptToken = `<script>window.LTI_TOKEN = "${ltiToken}";</script>`;
+        const maxUpload = parseInt(process.env.MAX_UPLOAD_SIZE_MB, 10) || 30;
+        const maxStorage = parseInt(process.env.MAX_STUDENT_STORAGE_MB, 10) || 100;
+        const scriptToken = `<script>
+            window.LTI_TOKEN = "${ltiToken || ''}";
+            window.USER_ID = "${userId || ''}";
+            window.PLATFORM_ID = "${platformId || ''}";
+            window.MAX_UPLOAD_SIZE_MB = ${maxUpload};
+            window.MAX_STUDENT_STORAGE_MB = ${maxStorage};
+        </script>`;
         finalHtml = finalHtml.replace('</head>', `${scriptToken}\n</head>`);
         res.send(finalHtml);
     });
@@ -26,7 +36,11 @@ async function setup(app) {
         app.get('/', (req, res) => {
             const userName = "userDev";
             const image = process.env.DEFAULT_MPI_IMAGE;
-            renderTemplate(res, userName, image);
+            if (req.session) {
+                req.session.userId = 'devUser';
+                req.session.platformId = 'devPlatform';
+            }
+            renderTemplate(res, userName, image, '', 'devUser', 'devPlatform');
         });
         
         app.get('/how-use', (req, res) => {
@@ -48,12 +62,10 @@ async function setup(app) {
         {
             staticPath: path.join(__dirname, '../public'),
             cookies: {
-                secure: process.env.NODE_ENV === 'production',
-                //secure: true, // Em produção sempre true
+                secure: true,
                 sameSite: 'None'
             },
-            devMode: process.env.NODE_ENV !== 'production'
-            //devMode: false
+            devMode: false
         }
     );
 
@@ -74,9 +86,8 @@ async function setup(app) {
     });
 
     lti.onConnect(async (token, req, res) => {
-        console.log('Usuário conectado:', token.userInfo.name , " ID:", token.user);
-        //ID para o MiniO
         req.session.userId = token.user;
+        req.session.platformId = token.platformId || token.clientId || 'moodle';
         req.session.save();
 
         return lti.redirect(res, "/home");
@@ -101,13 +112,20 @@ async function setup(app) {
 
         try {
             const userName = ltiToken.userInfo.name || 'Usuário Desconhecido';
+            const userId = ltiToken.user;
+            const platformId = ltiToken.platformId || ltiToken.clientId || 'moodle';
+
+            req.session.userId = userId;
+            req.session.platformId = platformId;
+            req.session.save();
+
             let image = process.env.DEFAULT_MPI_IMAGE;
             const customParams = ltiToken.platformContext.custom;
             if (customParams && customParams.imagem && customParams.imagem.toLowerCase() !== 'default') {
                 image = customParams.imagem;
             }
 
-            renderTemplate(res, userName, image, tokenRaw);
+            renderTemplate(res, userName, image, tokenRaw, userId, platformId);
         } catch (err) {
             console.error("[LTI Error] Erro ao processar template:", err);
             res.status(500).send("Erro interno ao carregar a página.");
