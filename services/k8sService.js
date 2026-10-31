@@ -2,27 +2,12 @@ const k8s = require('@kubernetes/client-node');
 const os = require('os');
 const { k8sApi, k8sNetworkingApi, namespace, kc, k8sExec } = require('../config/kubernetes');
 
-// Gerenciamento de portas hostPort para comunicação segura entre nós via Tailscale
-const activeHostPorts = new Map();
-
+// Funções auxiliares (legado de portas mantido como no-op para compatibilidade)
 function allocatePorts(jobId, count) {
-    const ports = [];
-    let candidate = 22100;
-    while (ports.length < count && candidate < 30000) {
-        let inUse = false;
-        for (const list of activeHostPorts.values()) {
-            if (list.includes(candidate)) { inUse = true; break; }
-        }
-        if (!inUse) ports.push(candidate);
-        candidate++;
-    }
-    activeHostPorts.set(jobId, ports);
-    return ports;
+    return [];
 }
 
-function releasePorts(jobId) {
-    activeHostPorts.delete(jobId);
-}
+function releasePorts(jobId) {}
 
 function getLocalTailscaleIp() {
     const interfaces = os.networkInterfaces();
@@ -53,13 +38,9 @@ function getSecretManifest(secretName, privateKey, publicKey, sshConfig) {
 function generateSshConfig(machineTargets) {
     let sshConfig = '';
     for (const target of machineTargets) {
-        sshConfig += `Host ${target.alias} ${target.fqdn}\n    HostName ${target.host}\n`;
-        if (target.port && target.port !== 22) {
-            sshConfig += `    Port ${target.port}\n`;
-        }
-        sshConfig += `    User aluno\n\n`;
+        sshConfig += `Host ${target.alias} ${target.fqdn}\n    HostName ${target.fqdn}\n    Port 22\n    User aluno\n\n`;
     }
-    sshConfig += `Host *\n    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null\n`;
+    sshConfig += `Host *\n    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null\n    LogLevel ERROR\n`;
     return sshConfig;
 }
 
@@ -173,33 +154,14 @@ async function createClusterResources(clusterInfo) {
     const hybridActive = Boolean(isHybrid && hasDedicatedNode && tenantTag && typeof numLocal === 'number' && typeof numCloud === 'number');
     const localPodsCount = hybridActive ? numLocal : (hasDedicatedNode ? 0 : numMachines);
 
-    const burstNodeList = Array.isArray(burstNodes) ? burstNodes : [];
-    const localTsIp = getLocalTailscaleIp();
-    const allocatedPorts = hasDedicatedNode ? allocatePorts(jobId, numMachines) : [];
-
-    // Mapeia os endpoints (host e porta) de cada pod para garantir comunicação perfeita
+    // Mapeia os endpoints (aliases e FQDNs) de cada pod para a rede plana Pod-to-Pod
     const machineTargets = [];
     for (let i = 0; i < numMachines; i++) {
         const isMaster = i === 0;
         const alias = isMaster ? 'master' : `worker-${i}`;
         const fqdn = `${alias}.${serviceName}.${namespace}.svc.cluster.local`;
         const isCloudPod = hybridActive ? (i >= localPodsCount) : (hasDedicatedNode && Boolean(tenantTag));
-
-        let host = fqdn;
-        let port = 22;
-
-        if (hasDedicatedNode) {
-            port = allocatedPorts[i] || (22100 + i);
-            if (isCloudPod) {
-                const cloudIdx = hybridActive ? (i - localPodsCount) : i;
-                const assignedBurst = burstNodeList[cloudIdx % (burstNodeList.length || 1)];
-                host = assignedBurst?.internalIp || localTsIp;
-            } else {
-                host = localTsIp;
-            }
-        }
-
-        machineTargets.push({ alias, fqdn, host, port, isCloudPod });
+        machineTargets.push({ alias, fqdn, isCloudPod });
     }
 
     try {
@@ -212,21 +174,26 @@ async function createClusterResources(clusterInfo) {
         if (e.body && e.body.code !== 404) console.log("Aviso de limpeza prévia:", e.body ? e.body.message : e.message);
     }
 
-    // Cria o secret com configuração SSH adaptativa (suporta local, nuvem e híbrido via Tailscale)
+    // Cria o secret com configuração SSH adaptativa apontando para os FQDNs na porta 22 padrão
     const sshConfig = generateSshConfig(machineTargets);
     const secretManifest = getSecretManifest(secretName, keys.privateKey, keys.publicKey, sshConfig);
     await k8sApi.createNamespacedSecret(namespace, secretManifest);
 
-    // Cria o service
+    // Cria o Headless Service com publishNotReadyAddresses: true para resolucao DNS imediata dos Pods
     const serviceManifest = {
         apiVersion: 'v1',
         kind: 'Service',
         metadata: { name: serviceName },
-        spec: { clusterIP: 'None', selector: { 'job-id': jobId } }
+        spec: { 
+            clusterIP: 'None', 
+            publishNotReadyAddresses: true,
+            selector: { 'job-id': jobId } 
+        }
     };
     await k8sApi.createNamespacedService(namespace, serviceManifest);
 
-    // Cria a NetworkPolicy para isolamento de rede permitindo tráfego SSH entre pods autorizados
+    // Cria a NetworkPolicy para isolamento multi-tenant da sessao
+    // Permite trafego em qualquer porta exclusivamente entre pods pertencentes ao mesmo job
     const netpolManifest = {
         apiVersion: 'networking.k8s.io/v1',
         kind: 'NetworkPolicy',
@@ -247,11 +214,6 @@ async function createClusterResources(clusterInfo) {
                                 matchLabels: { 'job-id': jobId }
                             }
                         }
-                    ]
-                },
-                {
-                    ports: [
-                        { protocol: 'TCP', port: 22 }
                     ]
                 }
             ]
@@ -290,22 +252,28 @@ async function createClusterResources(clusterInfo) {
                 },
                 hostname: networkHostname,
                 subdomain: serviceName,
+                dnsConfig: {
+                    searches: [`${serviceName}.${namespace}.svc.cluster.local`]
+                },
                 automountServiceAccountToken: false,
                 containers: [{
                     name: 'container',
                     image: image,
                     imagePullPolicy: 'IfNotPresent', // Em prod tem que ser "Always", para sempre atualizar a imagem
-                    ports: hasDedicatedNode ? [
-                        {
-                            name: 'ssh-hostport',
-                            containerPort: 22,
-                            hostPort: machineTargets[i].port
-                        }
-                    ] : [
+                    ports: [
                         {
                             name: 'ssh',
                             containerPort: 22
                         }
+                    ],
+                    command: ['/bin/bash', '-c'],
+                    args: [
+                        'mkdir -p /home/aluno/.openmpi && printf "btl_tcp_if_include = eth0\\noob_tcp_if_include = eth0\\nmpi_yield_when_idle = 1\\n" > /home/aluno/.openmpi/mca-params.conf && sudo mkdir -p /etc/openmpi && sudo sh -c \'printf "btl_tcp_if_include = eth0\\noob_tcp_if_include = eth0\\nmpi_yield_when_idle = 1\\n" > /etc/openmpi/openmpi-mca-params.conf\' && sudo /usr/sbin/sshd -D'
+                    ],
+                    env: [
+                        { name: 'OMPI_MCA_mpi_yield_when_idle', value: '1' },
+                        { name: 'OMPI_MCA_btl_tcp_if_include', value: 'eth0' },
+                        { name: 'OMPI_MCA_oob_tcp_if_include', value: 'eth0' }
                     ],
                     resources: {
                         requests: {
@@ -351,29 +319,32 @@ async function createClusterResources(clusterInfo) {
             }
         };
 
-        if (hasDedicatedNode) {
-            // Agrupa hostnames por IP único para evitar avisos ou rejeição de duplicate IP no Kubernetes
-            const aliasMap = new Map();
-            for (const t of machineTargets) {
-                if (!aliasMap.has(t.host)) {
-                    aliasMap.set(t.host, new Set());
+        // Regra de anti-afinidade para distribuir os pods equilibradamente entre os nós disponíveis
+        podManifest.spec.affinity = podManifest.spec.affinity || {};
+        podManifest.spec.affinity.podAntiAffinity = {
+            preferredDuringSchedulingIgnoredDuringExecution: [
+                {
+                    weight: 100,
+                    podAffinityTerm: {
+                        labelSelector: {
+                            matchExpressions: [
+                                {
+                                    key: 'job-id',
+                                    operator: 'In',
+                                    values: [jobId]
+                                }
+                            ]
+                        },
+                        topologyKey: 'kubernetes.io/hostname'
+                    }
                 }
-                aliasMap.get(t.host).add(t.alias);
-                aliasMap.get(t.host).add(t.fqdn);
-            }
-            podManifest.spec.hostAliases = Array.from(aliasMap.entries()).map(([ip, names]) => ({
-                ip,
-                hostnames: Array.from(names)
-            }));
-        }
+            ]
+        };
 
         // Define se este pod específico vai para a máquina dedicada na nuvem
         const isCloudPod = hybridActive ? (i >= localPodsCount) : (hasDedicatedNode && Boolean(tenantTag));
 
         if (isCloudPod && tenantTag) {
-            const cloudIdx = hybridActive ? (i - localPodsCount) : i;
-            const assignedBurst = burstNodeList[cloudIdx % (burstNodeList.length || 1)];
-
             podManifest.spec.tolerations = [
                 {
                     key: 'tenant',
@@ -382,28 +353,19 @@ async function createClusterResources(clusterInfo) {
                     effect: 'NoSchedule'
                 }
             ];
-            podManifest.spec.affinity = {
-                nodeAffinity: {
-                    requiredDuringSchedulingIgnoredDuringExecution: {
-                        nodeSelectorTerms: [{
-                            matchExpressions: [{
-                                key: 'tenant',
-                                operator: 'In',
-                                values: [tenantTag]
-                            }]
+            podManifest.spec.affinity.nodeAffinity = {
+                requiredDuringSchedulingIgnoredDuringExecution: {
+                    nodeSelectorTerms: [{
+                        matchExpressions: [{
+                            key: 'tenant',
+                            operator: 'In',
+                            values: [tenantTag]
                         }]
-                    }
+                    }]
                 }
             };
-
-            // Fixa o pod no nó remoto correspondente para casar perfeitamente com o IP mapeado no SSH
-            if (assignedBurst && assignedBurst.nodeName) {
-                podManifest.spec.nodeSelector = {
-                    'kubernetes.io/hostname': assignedBurst.nodeName
-                };
-            }
-        } else if (!isCloudPod && hasDedicatedNode) {
-            // Em clusters híbridos, garante que o pod local rode na máquina que possui a interface Tailscale (ubuntu10)
+        } else {
+            // Garante que os pods locais rodem na máquina que possui a interface Tailscale e CoreDNS (ubuntu10)
             podManifest.spec.nodeSelector = {
                 'kubernetes.io/hostname': 'ubuntu10'
             };

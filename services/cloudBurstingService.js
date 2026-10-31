@@ -39,7 +39,7 @@ function getEnvCredentials(providerName) {
             accessKeyId: process.env.AWS_ACCESS_KEY_ID,
             secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
             sessionToken: process.env.AWS_SESSION_TOKEN,
-            instanceType: process.env.INSTANCE_TYPE || 't2.micro',
+            instanceType: process.env.INSTANCE_TYPE || 't3.medium',
             keyPairName: process.env.AWS_KEY_PAIR_NAME,
             tailscaleAuthKey: process.env.TAILSCALE_AUTH_KEY
         };
@@ -131,7 +131,6 @@ async function waitForMultipleNodesInCluster(targetsList, timeoutMs = 450000, on
     const pendingTargets = [...targetsList];
     const readyNodes = [];
     const seenInTailscale = new Set();
-    const calicoRestarted = new Set();
     let lastProgressNotice = Date.now();
 
     console.log(`[BURST] Monitorando cluster: aguardando ${targetsList.length} nó(s) [${targetsList.map(t => t.targetId).join(', ')}] (timeout: ${timeoutMs / 1000}s)...`);
@@ -195,14 +194,6 @@ async function waitForMultipleNodesInCluster(targetsList, timeoutMs = 450000, on
                         pendingTargets.splice(i, 1);
                         if (onProgress) {
                             onProgress(4, `${readyNodes.length}/${targetsList.length} nó(s) pronto(s) e integrado(s) ao cluster!`);
-                        }
-                    } else {
-                        // Se o calico-node falhou nos primeiros segundos por causa de inicialização assíncrona,
-                        // reinicia o pod calico-node deste nó para não aguardar timeout
-                        if (!calicoRestarted.has(name) && elapsedSec >= 20) {
-                            calicoRestarted.add(name);
-                            console.log(`[BURST] Nó ${name} aguardando rede. Reiniciando pod calico-node para inicialização imediata...`);
-                            execAsync(`microk8s kubectl delete pod -n kube-system -l k8s-app=calico-node --field-selector spec.nodeName=${name}`).catch(() => {});
                         }
                     }
                 }

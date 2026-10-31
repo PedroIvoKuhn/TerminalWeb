@@ -88,6 +88,9 @@ async function getLatestUbuntuAmi(client) {
 function buildUserDataScript(joinCommand = '', tailscaleKey = process.env.TAILSCALE_AUTH_KEY, nodeName = '', imageToPreload = null) {
     const masterHost = (joinCommand.match(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/) || [])[0] || '100.90.80.70';
     const safeImage = (imageToPreload || '').trim().replace(/[^a-zA-Z0-9_.:\/\-]/g, '');
+    const ctrImage = safeImage && (safeImage.startsWith('docker.io/') || safeImage.includes('.')) 
+        ? safeImage 
+        : (safeImage ? `docker.io/${safeImage}` : '');
 
     let script = `#!/bin/bash
 exec > /var/log/burst-init.log 2>&1
@@ -96,7 +99,7 @@ set -x
 echo "=== INICIANDO CONFIGURACAO DO BURST NODE AWS ==="
 date
 
-# Define o hostname do sistema se informado
+# 1. Define o hostname do sistema se informado
 if [ -n "${nodeName}" ]; then
     hostnamectl set-hostname "${nodeName}" || true
     echo "${nodeName}" > /etc/hostname || true
@@ -104,7 +107,18 @@ if [ -n "${nodeName}" ]; then
     echo "127.0.0.1 ${nodeName}" >> /etc/hosts || true
 fi
 
-# Garante curl instalado rapidamente sem update desnecessário se já existir
+# 2. Habilita IP Forwarding e Loose rp_filter no Kernel para roteamento Calico sobre VPN
+echo "--- Configurando Kernel e Sysctl para Calico VXLAN sobre Tailscale ---"
+sysctl -w net.ipv4.ip_forward=1 || true
+sysctl -w net.ipv4.conf.all.rp_filter=2 || true
+sysctl -w net.ipv4.conf.default.rp_filter=2 || true
+cat << 'SYSCTL_EOF' > /etc/sysctl.d/99-hybrid-calico.conf
+net.ipv4.ip_forward = 1
+net.ipv4.conf.all.rp_filter = 2
+net.ipv4.conf.default.rp_filter = 2
+SYSCTL_EOF
+
+# 3. Garante curl instalado rapidamente sem update desnecessário se já existir
 if ! command -v curl >/dev/null 2>&1; then
     while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
         echo "Aguardando lock do apt ser liberado..."
@@ -113,7 +127,7 @@ if ! command -v curl >/dev/null 2>&1; then
     apt-get update -y && apt-get install -y curl
 fi
 
-# --- Instalando e Configurando o Tailscale ---
+# 4. Instalando e Configurando o Tailscale
 echo "--- Instalando Tailscale ---"
 curl -fsSL https://tailscale.com/install.sh | sh
 `;
@@ -137,84 +151,35 @@ done
 echo "--- Configurando iptables-legacy ---"
 update-alternatives --set iptables /usr/sbin/iptables-legacy || true
 update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy || true
-`;
-    } else {
-        console.warn("AVISO: TAILSCALE_AUTH_KEY não definido. Instância subirá sem VPN.");
-    }
 
-    if (joinCommand) {
-        let finalJoin = joinCommand.includes('--worker') ? joinCommand : `${joinCommand} --worker`;
-        script += `
-# --- Instalando o MicroK8s ---
-echo "--- Instalando MicroK8s snap ---"
-for i in {1..5}; do
-    snap install microk8s --classic --channel=1.32/stable && break || sleep 5
-done
-
-usermod -aG microk8s ubuntu
-
-# Configura o kubelet para anunciar o IP do Tailscale e hostname ao cluster
-if [ -n "$TS_IP" ]; then
-    echo "Configurando --node-ip=$TS_IP no kubelet..."
-    mkdir -p /var/snap/microk8s/current/args
-    echo "--node-ip=$TS_IP" >> /var/snap/microk8s/current/args/kubelet
-    ${nodeName ? `echo "--hostname-override=${nodeName}" >> /var/snap/microk8s/current/args/kubelet` : ''}
-    systemctl restart snap.microk8s.daemon-kubelite 2>/dev/null || systemctl restart snap.microk8s.daemon-kubelet 2>/dev/null || snap restart microk8s
+if command -v ufw &>/dev/null; then
+    ufw allow in on tailscale0 to any port 4789 proto udp 2>/dev/null || true
+    ufw route allow in on tailscale0 out on cali+ 2>/dev/null || true
+    ufw route allow in on cali+ out on tailscale0 2>/dev/null || true
+    ufw route allow in on tailscale0 out on vxlan.calico 2>/dev/null || true
+    ufw route allow in on vxlan.calico out on tailscale0 2>/dev/null || true
 fi
 
-mkdir -p /home/ubuntu/.kube
-chown -f -R ubuntu:ubuntu /home/ubuntu/.kube || true
-
-${safeImage ? `
-# --- Pre-download antecipado da imagem Docker em background ---
-echo "--- Iniciando pre-download da imagem ${safeImage} em background ---"
-nohup microk8s crictl pull "${safeImage}" > /var/log/burst-preload.log 2>&1 &
-` : ''}
-
-# --- Executando Join com MicroK8s Master ---
-echo "--- INICIANDO JOIN COM MICROK8S ---"
-date
-for i in {1..10}; do
-    echo "Tentativa $i de join..."
-    ${finalJoin} && break || sleep 5
-done
-
-echo "--- JOIN FINALIZADO ---"
-date
-
-# --- Garante que o kubelet anuncie o IP do Tailscale pos-join ---
-if [ -n "$TS_IP" ]; then
-    echo "--- Configurando --node-ip=$TS_IP pos-join ---"
-    sed -i '/--node-ip=/d' /var/snap/microk8s/current/args/kubelet 2>/dev/null || true
-    echo "--node-ip=$TS_IP" >> /var/snap/microk8s/current/args/kubelet
-    ${nodeName ? `
-    sed -i '/--hostname-override=/d' /var/snap/microk8s/current/args/kubelet 2>/dev/null || true
-    echo "--hostname-override=${nodeName}" >> /var/snap/microk8s/current/args/kubelet
-    ` : ''}
-    systemctl restart snap.microk8s.daemon-kubelite 2>/dev/null || systemctl restart snap.microk8s.daemon-kubelet 2>/dev/null || snap restart microk8s
-fi
-
-# --- Configuracao de DNAT e Watchdog para Kubernetes Service (${masterHost}) ---
-echo "--- Configurando regras de DNAT e Watchdog pos-join ---"
+# --- Configuração de DNAT e Watchdog ANTES do Join (${masterHost}) ---
+echo "--- Configurando regras de DNAT e Watchdog antes do join ---"
 cat << 'WATCHDOG_EOF' > /usr/local/bin/burst-dnat-watchdog.sh
 #!/bin/bash
 MASTER_HOST="${masterHost}"
 
 apply_rules() {
     for ipt in iptables-legacy iptables; do
-        # 1. Garante que a regra de DNAT para o Service ClusterIP esteja sempre na posicao 1 do OUTPUT
+        # 1. Garante que a regra de DNAT para o Service ClusterIP (10.152.183.1:443) esteja sempre na posição 1
         first_out=$($ipt -t nat -S OUTPUT 2>/dev/null | sed -n '2p')
-        if ! echo "$first_out" | grep -q "10.152.183.1"; then
+        if ! echo "$first_out" | grep -E -q "10\.152\.183\.1(/32)?[[:space:]]"; then
             $ipt -t nat -I OUTPUT 1 -d 10.152.183.1 -p tcp --dport 443 -j DNAT --to-destination $MASTER_HOST:16443 2>/dev/null || true
         fi
 
-        # 2. Garante que a regra de DNAT para o Service ClusterIP esteja sempre na posicao 1 do PREROUTING
         first_pre=$($ipt -t nat -S PREROUTING 2>/dev/null | sed -n '2p')
-        if ! echo "$first_pre" | grep -q "10.152.183.1"; then
+        if ! echo "$first_pre" | grep -E -q "10\.152\.183\.1(/32)?[[:space:]]"; then
             $ipt -t nat -I PREROUTING 1 -d 10.152.183.1 -p tcp --dport 443 -j DNAT --to-destination $MASTER_HOST:16443 2>/dev/null || true
         fi
 
-        # 2b. Garante que a regra de DNAT para o CoreDNS (ClusterIP 10.152.183.10:53) aponte para o DNS forwarder do Master via Tailscale (porta 5353)
+        # 2. Garante que a regra de DNAT para o CoreDNS (ClusterIP 10.152.183.10:53) aponte para o DNS forwarder do Master via Tailscale (porta 5353)
         if ! $ipt -t nat -C OUTPUT -d 10.152.183.10 -p udp --dport 53 -j DNAT --to-destination $MASTER_HOST:5353 2>/dev/null; then
             $ipt -t nat -I OUTPUT 1 -d 10.152.183.10 -p udp --dport 53 -j DNAT --to-destination $MASTER_HOST:5353 2>/dev/null || true
         fi
@@ -240,6 +205,29 @@ apply_rules() {
         if ! $ipt -t nat -C POSTROUTING -o tailscale0 -j MASQUERADE 2>/dev/null; then
             $ipt -t nat -A POSTROUTING -o tailscale0 -j MASQUERADE 2>/dev/null || true
         fi
+
+        # 5. Permite tráfego UDP 4789 (VXLAN) vindo da interface tailscale0
+        if ! $ipt -C INPUT -i tailscale0 -p udp --dport 4789 -j ACCEPT 2>/dev/null; then
+            $ipt -I INPUT 1 -i tailscale0 -p udp --dport 4789 -j ACCEPT 2>/dev/null || true
+        fi
+
+        # 6. Permite FORWARD bidirecional entre tailscale0 e as interfaces Calico (cali+ e vxlan.calico)
+        for iface in cali+ vxlan.calico; do
+            if ! $ipt -C FORWARD -i tailscale0 -o "$iface" -j ACCEPT 2>/dev/null; then
+                $ipt -I FORWARD 1 -i tailscale0 -o "$iface" -j ACCEPT 2>/dev/null || true
+            fi
+            if ! $ipt -C FORWARD -i "$iface" -o tailscale0 -j ACCEPT 2>/dev/null; then
+                $ipt -I FORWARD 1 -i "$iface" -o tailscale0 -j ACCEPT 2>/dev/null || true
+            fi
+        done
+
+        # 7. Previne loop de roteamento/encapsulação circular Tailscale sobre interfaces Calico
+        if ! $ipt -C OUTPUT -d 10.1.0.0/16 -p udp --dport 41641 -j DROP 2>/dev/null; then
+            $ipt -I OUTPUT 1 -d 10.1.0.0/16 -p udp --dport 41641 -j DROP 2>/dev/null || true
+        fi
+        if ! $ipt -C OUTPUT -o vxlan.calico -p udp --dport 41641 -j DROP 2>/dev/null; then
+            $ipt -I OUTPUT 1 -o vxlan.calico -p udp --dport 41641 -j DROP 2>/dev/null || true
+        fi
     done
 }
 
@@ -251,6 +239,81 @@ WATCHDOG_EOF
 
 chmod +x /usr/local/bin/burst-dnat-watchdog.sh
 nohup /usr/local/bin/burst-dnat-watchdog.sh >/var/log/burst-watchdog.log 2>&1 &
+
+# Aplica imediatamente a primeira execução das regras antes do join
+for ipt in iptables-legacy iptables; do
+    $ipt -t nat -I OUTPUT 1 -d 10.152.183.1 -p tcp --dport 443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
+    $ipt -t nat -I PREROUTING 1 -d 10.152.183.1 -p tcp --dport 443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
+    $ipt -t nat -I OUTPUT 1 -d 10.152.183.10 -p udp --dport 53 -j DNAT --to-destination ${masterHost}:5353 2>/dev/null || true
+    $ipt -t nat -I PREROUTING 1 -d 10.152.183.10 -p udp --dport 53 -j DNAT --to-destination ${masterHost}:5353 2>/dev/null || true
+    $ipt -t nat -I OUTPUT 1 -d 10.152.183.10 -p tcp --dport 53 -j DNAT --to-destination ${masterHost}:5353 2>/dev/null || true
+    $ipt -t nat -I PREROUTING 1 -d 10.152.183.10 -p tcp --dport 53 -j DNAT --to-destination ${masterHost}:5353 2>/dev/null || true
+    $ipt -t nat -A OUTPUT -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
+    $ipt -t nat -A PREROUTING -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
+    $ipt -t nat -A POSTROUTING -o tailscale0 -j MASQUERADE 2>/dev/null || true
+    $ipt -I INPUT 1 -i tailscale0 -p udp --dport 4789 -j ACCEPT 2>/dev/null || true
+    $ipt -I OUTPUT 1 -d 10.1.0.0/16 -p udp --dport 41641 -j DROP 2>/dev/null || true
+    $ipt -I OUTPUT 1 -o vxlan.calico -p udp --dport 41641 -j DROP 2>/dev/null || true
+    for iface in cali+ vxlan.calico; do
+        $ipt -I FORWARD 1 -i tailscale0 -o "$iface" -j ACCEPT 2>/dev/null || true
+        $ipt -I FORWARD 1 -i "$iface" -o tailscale0 -j ACCEPT 2>/dev/null || true
+    done
+done
+`;
+    } else {
+        console.warn("AVISO: TAILSCALE_AUTH_KEY não definido. Instância subirá sem VPN.");
+    }
+
+    if (joinCommand) {
+        let finalJoin = joinCommand.includes('--worker') ? joinCommand : `${joinCommand} --worker`;
+        script += `
+# --- Instalando o MicroK8s ---
+echo "--- Instalando MicroK8s snap ---"
+for i in {1..5}; do
+    snap install microk8s --classic --channel=1.32/stable && break || sleep 5
+done
+
+usermod -aG microk8s ubuntu
+
+# Configura o kubelet para anunciar o IP do Tailscale e hostname ao cluster antes do join
+if [ -n "$TS_IP" ]; then
+    echo "Configurando --node-ip=$TS_IP no kubelet..."
+    mkdir -p /var/snap/microk8s/current/args
+    echo "--node-ip=$TS_IP" >> /var/snap/microk8s/current/args/kubelet
+    ${nodeName ? `echo "--hostname-override=${nodeName}" >> /var/snap/microk8s/current/args/kubelet` : ''}
+fi
+
+mkdir -p /home/ubuntu/.kube
+chown -f -R ubuntu:ubuntu /home/ubuntu/.kube || true
+
+# --- Executando Join com MicroK8s Master ---
+echo "--- INICIANDO JOIN COM MICROK8S ---"
+date
+for i in {1..10}; do
+    echo "Tentativa $i de join..."
+    ${finalJoin} && break || sleep 5
+done
+
+echo "--- JOIN FINALIZADO ---"
+date
+
+# --- Garante que o kubelet anuncie o IP do Tailscale pos-join ---
+if [ -n "$TS_IP" ]; then
+    echo "--- Configurando --node-ip=$TS_IP pos-join ---"
+    sed -i '/--node-ip=/d' /var/snap/microk8s/current/args/kubelet 2>/dev/null || true
+    echo "--node-ip=$TS_IP" >> /var/snap/microk8s/current/args/kubelet
+    ${nodeName ? `
+    sed -i '/--hostname-override=/d' /var/snap/microk8s/current/args/kubelet 2>/dev/null || true
+    echo "--hostname-override=${nodeName}" >> /var/snap/microk8s/current/args/kubelet
+    ` : ''}
+    systemctl restart snap.microk8s.daemon-kubelite 2>/dev/null || systemctl restart snap.microk8s.daemon-kubelet 2>/dev/null || snap restart microk8s
+fi
+
+${safeImage ? `
+# --- Pre-download antecipado da imagem Docker em background (após estabilização do containerd) ---
+echo "--- Iniciando pre-download da imagem ${ctrImage} em background ---"
+nohup microk8s ctr --namespace k8s.io images pull "${ctrImage}" > /var/log/burst-preload.log 2>&1 &
+` : ''}
 
 # --- Configuracao do Heartbeat Watchdog (${masterHost}) ---
 echo "--- Configurando Heartbeat Watchdog ---"
@@ -290,18 +353,6 @@ HEARTBEAT_EOF
 chmod +x /usr/local/bin/burst-heartbeat-watchdog.sh
 nohup /usr/local/bin/burst-heartbeat-watchdog.sh >/var/log/burst-heartbeat.log 2>&1 &
 
-# Executa imediatamente a primeira aplicacao das regras
-for ipt in iptables-legacy iptables; do
-    $ipt -t nat -I OUTPUT 1 -d 10.152.183.1 -p tcp --dport 443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
-    $ipt -t nat -I PREROUTING 1 -d 10.152.183.1 -p tcp --dport 443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
-    $ipt -t nat -I OUTPUT 1 -d 10.152.183.10 -p udp --dport 53 -j DNAT --to-destination ${masterHost}:5353 2>/dev/null || true
-    $ipt -t nat -I PREROUTING 1 -d 10.152.183.10 -p udp --dport 53 -j DNAT --to-destination ${masterHost}:5353 2>/dev/null || true
-    $ipt -t nat -I OUTPUT 1 -d 10.152.183.10 -p tcp --dport 53 -j DNAT --to-destination ${masterHost}:5353 2>/dev/null || true
-    $ipt -t nat -I PREROUTING 1 -d 10.152.183.10 -p tcp --dport 53 -j DNAT --to-destination ${masterHost}:5353 2>/dev/null || true
-    $ipt -t nat -A OUTPUT -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
-    $ipt -t nat -A PREROUTING -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
-    $ipt -t nat -A POSTROUTING -o tailscale0 -j MASQUERADE 2>/dev/null || true
-done
 echo "=== CONFIGURACAO CONCLUIDA COM SUCESSO ==="
 date
 `;
@@ -313,7 +364,7 @@ date
 async function addNode(joinCommand = '', credentials = {}, options = {}) {
     const { onProgress, tags = {}, onCreated, imageToPreload } = options;
     const client = createEc2Client(credentials);
-    const instanceType = credentials.instanceType || process.env.INSTANCE_TYPE || 't2.micro';
+    const instanceType = credentials.instanceType || process.env.INSTANCE_TYPE || 't3.medium';
     const keyPairName = credentials.keyPairName || process.env.AWS_KEY_PAIR_NAME;
 
     console.log("-> Buscando a AMI mais recente (Ubuntu 22.04 LTS)...");
