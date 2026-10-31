@@ -364,14 +364,14 @@ async function createClusterResources(clusterInfo) {
                     }]
                 }
             };
-        } else {
-            // Garante que os pods locais rodem nos nós físicos elegíveis conectados à rede Tailscale.
-            // Por padrão, balanceia entre as duas máquinas i7 locais ('ubuntu10' e 'ubuntu11'), podendo ser
-            // customizado via variável de ambiente LOCAL_CLUSTER_NODES (ex: 'ubuntu10,ubuntu11,ubuntu00').
+        } else if (hybridActive) {
+            // Em cluster híbrido, os pods locais DEVEM rodar exclusivamente nos nós físicos conectados
+            // à rede Tailscale (ubuntu10, ubuntu11, ubuntu00, ubuntu03, ubuntu05), garantindo que os pods
+            // remotos na nuvem consigam alcançá-los através da malha Calico VXLAN sobre a VPN.
             const envLocalNodes = process.env.LOCAL_CLUSTER_NODES;
             const eligibleLocalNodes = envLocalNodes 
                 ? envLocalNodes.split(',').map(s => s.trim()).filter(Boolean)
-                : ['ubuntu10', 'ubuntu11'];
+                : ['ubuntu10', 'ubuntu11', 'ubuntu00', 'ubuntu03', 'ubuntu05'];
 
             podManifest.spec.affinity.nodeAffinity = {
                 requiredDuringSchedulingIgnoredDuringExecution: {
@@ -385,8 +385,7 @@ async function createClusterResources(clusterInfo) {
                 }
             };
 
-            // Para o nó master (i === 0), adiciona preferência suave por 'ubuntu10' (onde roda o backend e CoreDNS),
-            // enquanto os workers serão espalhados para outros nós locais (como ubuntu11) pela regra de podAntiAffinity.
+            // Para o nó master (i === 0), adiciona preferência suave por 'ubuntu10' (onde roda o backend e CoreDNS)
             if (i === 0) {
                 podManifest.spec.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution = [
                     {
@@ -401,6 +400,11 @@ async function createClusterResources(clusterInfo) {
                     }
                 ];
             }
+        } else {
+            // Em cluster puramente local (sem cloud bursting):
+            // Não impõe nenhuma restrição de nós! O Kubernetes pode agendar livremente por TODO o cluster
+            // físico do laboratório (ubuntu00 até ubuntu11). A regra de podAntiAffinity com peso 100
+            // distribuirá os pods equilibradamente entre as diferentes máquinas disponíveis.
         }
 
         //console.log(`Criando Pod: ${podName}`);
