@@ -364,10 +364,12 @@ async function createClusterResources(clusterInfo) {
                     }]
                 }
             };
-        } else if (hybridActive) {
-            // Em cluster híbrido, os pods locais DEVEM rodar exclusivamente nos nós físicos conectados
-            // à rede Tailscale (ubuntu10, ubuntu11, ubuntu00, ubuntu03, ubuntu05), garantindo que os pods
-            // remotos na nuvem consigam alcançá-los através da malha Calico VXLAN sobre a VPN.
+        } else {
+            // Pods locais (seja no cluster puramente local ou no cluster híbrido):
+            // Devem rodar exclusivamente nos nós físicos que possuem o agente Tailscale ativo e a
+            // interface tailscale0 integrada ao Calico CNI (ubuntu10, ubuntu11, ubuntu00, ubuntu03, ubuntu05).
+            // Com 5 máquinas elegíveis, a regra de podAntiAffinity (peso 100) distribuirá uma réplica por
+            // máquina física distinta, assegurando isolamento total de hardware em 4 nós do laboratório!
             const envLocalNodes = process.env.LOCAL_CLUSTER_NODES;
             const eligibleLocalNodes = envLocalNodes 
                 ? envLocalNodes.split(',').map(s => s.trim()).filter(Boolean)
@@ -400,11 +402,6 @@ async function createClusterResources(clusterInfo) {
                     }
                 ];
             }
-        } else {
-            // Em cluster puramente local (sem cloud bursting):
-            // Não impõe nenhuma restrição de nós! O Kubernetes pode agendar livremente por TODO o cluster
-            // físico do laboratório (ubuntu00 até ubuntu11). A regra de podAntiAffinity com peso 100
-            // distribuirá os pods equilibradamente entre as diferentes máquinas disponíveis.
         }
 
         //console.log(`Criando Pod: ${podName}`);
