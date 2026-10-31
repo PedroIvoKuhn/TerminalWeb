@@ -365,10 +365,42 @@ async function createClusterResources(clusterInfo) {
                 }
             };
         } else {
-            // Garante que os pods locais rodem na máquina que possui a interface Tailscale e CoreDNS (ubuntu10)
-            podManifest.spec.nodeSelector = {
-                'kubernetes.io/hostname': 'ubuntu10'
+            // Garante que os pods locais rodem nos nós físicos elegíveis conectados à rede Tailscale.
+            // Por padrão, balanceia entre as duas máquinas i7 locais ('ubuntu10' e 'ubuntu11'), podendo ser
+            // customizado via variável de ambiente LOCAL_CLUSTER_NODES (ex: 'ubuntu10,ubuntu11,ubuntu00').
+            const envLocalNodes = process.env.LOCAL_CLUSTER_NODES;
+            const eligibleLocalNodes = envLocalNodes 
+                ? envLocalNodes.split(',').map(s => s.trim()).filter(Boolean)
+                : ['ubuntu10', 'ubuntu11'];
+
+            podManifest.spec.affinity.nodeAffinity = {
+                requiredDuringSchedulingIgnoredDuringExecution: {
+                    nodeSelectorTerms: [{
+                        matchExpressions: [{
+                            key: 'kubernetes.io/hostname',
+                            operator: 'In',
+                            values: eligibleLocalNodes
+                        }]
+                    }]
+                }
             };
+
+            // Para o nó master (i === 0), adiciona preferência suave por 'ubuntu10' (onde roda o backend e CoreDNS),
+            // enquanto os workers serão espalhados para outros nós locais (como ubuntu11) pela regra de podAntiAffinity.
+            if (i === 0) {
+                podManifest.spec.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution = [
+                    {
+                        weight: 50,
+                        preference: {
+                            matchExpressions: [{
+                                key: 'kubernetes.io/hostname',
+                                operator: 'In',
+                                values: ['ubuntu10']
+                            }]
+                        }
+                    }
+                ];
+            }
         }
 
         //console.log(`Criando Pod: ${podName}`);
