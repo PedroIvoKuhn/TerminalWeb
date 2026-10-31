@@ -100,3 +100,4 @@ fi
 echo -e "\n${BOLD}${GREEN}✔ Nó físico pronto para a rede híbrida Pod-to-Pod!${NC}"
 echo -e "Agora, no nó master (ubuntu10), reinicie o pod do Calico deste nó com:"
 echo -e "  ${BOLD}microk8s kubectl delete pod -n kube-system -l k8s-app=calico-node --field-selector spec.nodeName=$(hostname)${NC}\n"
+

@@ -90,6 +90,7 @@ microk8s kubectl get pods -n terminal-web
 microk8s kubectl cp benchmarks/mpi_matmul.c terminal-web/<POD_MASTER>:/home/aluno/mpi_matmul.c
 microk8s kubectl cp benchmarks/mpi_heat2d.c terminal-web/<POD_MASTER>:/home/aluno/mpi_heat2d.c
 microk8s kubectl cp benchmarks/run_benchmarks.sh terminal-web/<POD_MASTER>:/home/aluno/run_benchmarks.sh
+microk8s kubectl cp benchmarks/run_benchmarks_hybrid.sh terminal-web/<POD_MASTER>:/home/aluno/run_benchmarks_hybrid.sh
 ```
 
 *(Alternativamente, você pode abrir o editor integrado do TerminalWeb no navegador e colar o código de cada arquivo).*
@@ -97,8 +98,9 @@ microk8s kubectl cp benchmarks/run_benchmarks.sh terminal-web/<POD_MASTER>:/home
 ### Passo 3: Executar a Bateria MPI
 Dentro do terminal web do aluno (ou via `microk8s kubectl exec`):
 
+#### A) Para Cenários Homogêneos (Nuvem Pura ou Local Puro):
+Utilize o script sequencial padrão `run_benchmarks.sh`:
 ```bash
-# Permissão de execução
 chmod +x run_benchmarks.sh
 
 # Se estiver testando no Pod Master isolado (np=1):
@@ -107,8 +109,18 @@ chmod +x run_benchmarks.sh
 # Se estiver em 2 pods (master e worker-1):
 ./run_benchmarks.sh "master,worker-1"
 
-# Se estiver em 4 pods:
+# Se estiver em 4 pods (master, worker-1, worker-2, worker-3):
 ./run_benchmarks.sh "master,worker-1,worker-2,worker-3"
+```
+*(No cenário com 4 pods, np=2 executará em `master,worker-1`, garantindo que na Nuvem Pura com 2 VMs cada processo execute em uma VM independente).*
+
+#### B) Para o Cenário Híbrido (Local + Nuvem):
+Utilize o script especializado `run_benchmarks_hybrid.sh`:
+```bash
+chmod +x run_benchmarks_hybrid.sh
+
+# Executa np=1 (Master Local), np=2 (Master Local + Worker-2 Nuvem) e np=4 (2 Locais + 2 Nuvem):
+./run_benchmarks_hybrid.sh "master,worker-1,worker-2,worker-3"
 ```
 
 ### Passo 4: Executar o Teste de QoE (Latência do Terminal)

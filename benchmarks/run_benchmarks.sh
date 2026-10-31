@@ -67,30 +67,6 @@ fi
 echo "Processos a avaliar (np): $PROCESS_LIST"
 echo ""
 
-# Determina o mapeamento de hosts ideal para cada np:
-# Para np=2 em clusters com 3 ou mais nós (ex: master,worker-1,worker-2,worker-3),
-# seleciona intencionalmente "master,worker-2" para cobrir 1 nó Local + 1 nó Nuvem no cluster híbrido.
-get_hosts_for_np() {
-    local target_np="$1"
-    local raw_hosts="$2"
-    if [ -z "$raw_hosts" ]; then
-        echo ""
-        return
-    fi
-
-    IFS=',' read -ra ALL_HOSTS <<< "$raw_hosts"
-    local total=${#ALL_HOSTS[@]}
-
-    if [ "$target_np" -eq 2 ] && [ "$total" -ge 3 ]; then
-        echo "${ALL_HOSTS[0]},${ALL_HOSTS[2]}"
-    elif [ "$target_np" -le "$total" ]; then
-        local sel=("${ALL_HOSTS[@]:0:$target_np}")
-        (IFS=','; echo "${sel[*]}")
-    else
-        echo "$raw_hosts"
-    fi
-}
-
 # 2. Testes CPU-Bound (Multiplicação de Matrizes N=2800)
 echo "=========================================================="
 echo " [2/3] Executando Carga CPU-Bound (mpi_matmul N=2800)"
@@ -102,13 +78,16 @@ for np in $PROCESS_LIST; do
     # Determina o subconjunto exato de hosts para o np atual
     CURRENT_HOSTS_FLAG=""
     if [ -n "$1" ]; then
-        CURRENT_HOSTS=$(get_hosts_for_np "$np" "$1")
-        CURRENT_HOSTS_FLAG="-H $CURRENT_HOSTS"
-        if [ "$np" -eq 2 ] && [ "$CURRENT_HOSTS" = "master,worker-2" ]; then
-            echo "Hosts ativos para np=$np: $CURRENT_HOSTS (pareamento híbrido Local + Nuvem)"
+        IFS=',' read -ra ALL_HOSTS <<< "$1"
+        TOTAL_AVAILABLE=${#ALL_HOSTS[@]}
+        if [ "$np" -le "$TOTAL_AVAILABLE" ]; then
+            SELECTED=("${ALL_HOSTS[@]:0:$np}")
+            CURRENT_HOSTS=$(IFS=','; echo "${SELECTED[*]}")
         else
-            echo "Hosts ativos para np=$np: $CURRENT_HOSTS"
+            CURRENT_HOSTS="$1"
         fi
+        CURRENT_HOSTS_FLAG="-H $CURRENT_HOSTS"
+        echo "Hosts ativos para np=$np: $CURRENT_HOSTS"
     fi
 
     for r in $(seq 1 $REPS); do
@@ -141,13 +120,16 @@ for np in $PROCESS_LIST; do
     # Determina o subconjunto exato de hosts para o np atual
     CURRENT_HOSTS_FLAG=""
     if [ -n "$1" ]; then
-        CURRENT_HOSTS=$(get_hosts_for_np "$np" "$1")
-        CURRENT_HOSTS_FLAG="-H $CURRENT_HOSTS"
-        if [ "$np" -eq 2 ] && [ "$CURRENT_HOSTS" = "master,worker-2" ]; then
-            echo "Hosts ativos para np=$np: $CURRENT_HOSTS (pareamento híbrido Local + Nuvem)"
+        IFS=',' read -ra ALL_HOSTS <<< "$1"
+        TOTAL_AVAILABLE=${#ALL_HOSTS[@]}
+        if [ "$np" -le "$TOTAL_AVAILABLE" ]; then
+            SELECTED=("${ALL_HOSTS[@]:0:$np}")
+            CURRENT_HOSTS=$(IFS=','; echo "${SELECTED[*]}")
         else
-            echo "Hosts ativos para np=$np: $CURRENT_HOSTS"
+            CURRENT_HOSTS="$1"
         fi
+        CURRENT_HOSTS_FLAG="-H $CURRENT_HOSTS"
+        echo "Hosts ativos para np=$np: $CURRENT_HOSTS"
     fi
 
     for r in $(seq 1 $REPS); do
