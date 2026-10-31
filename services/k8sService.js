@@ -345,6 +345,10 @@ async function createClusterResources(clusterInfo) {
         const isCloudPod = hybridActive ? (i >= localPodsCount) : (hasDedicatedNode && Boolean(tenantTag));
 
         if (isCloudPod && tenantTag) {
+            const burstNodeList = Array.isArray(burstNodes) ? burstNodes : [];
+            const cloudIdx = hybridActive ? (i - localPodsCount) : i;
+            const assignedBurst = burstNodeList[cloudIdx % (burstNodeList.length || 1)];
+
             podManifest.spec.tolerations = [
                 {
                     key: 'tenant',
@@ -364,16 +368,26 @@ async function createClusterResources(clusterInfo) {
                     }]
                 }
             };
+
+            // Fixa o pod no nó remoto correspondente de forma round-robin, garantindo balanceamento perfeito entre as VMs da nuvem!
+            if (assignedBurst && assignedBurst.nodeName) {
+                podManifest.spec.nodeSelector = {
+                    'kubernetes.io/hostname': assignedBurst.nodeName
+                };
+            }
         } else {
             // Pods locais (seja no cluster puramente local ou no cluster híbrido):
-            // Devem rodar exclusivamente nos nós físicos que possuem o agente Tailscale ativo e a
-            // interface tailscale0 integrada ao Calico CNI (ubuntu10, ubuntu11, ubuntu00, ubuntu03, ubuntu05).
-            // Com 5 máquinas elegíveis, a regra de podAntiAffinity (peso 100) distribuirá uma réplica por
-            // máquina física distinta, assegurando isolamento total de hardware em 4 nós do laboratório!
+            // Agora que todas as máquinas possuem Tailscale e Calico integrados, podem rodar em qualquer
+            // nó físico local do cluster. Se LOCAL_CLUSTER_NODES estiver definido no .env
+            // (ex: 'ubuntu10,ubuntu11' para benchmark homogêneo em i7), restringe a esses nós.
             const envLocalNodes = process.env.LOCAL_CLUSTER_NODES;
             const eligibleLocalNodes = envLocalNodes 
                 ? envLocalNodes.split(',').map(s => s.trim()).filter(Boolean)
-                : ['ubuntu10', 'ubuntu11', 'ubuntu00', 'ubuntu03', 'ubuntu05'];
+                : [
+                    'ubuntu10', 'ubuntu11', 
+                    'ubuntu00', 'ubuntu03', 'ubuntu05', 
+                    'ubuntu06', 'ubuntu07', 'ubuntu08', 'ubuntu09'
+                  ];
 
             podManifest.spec.affinity.nodeAffinity = {
                 requiredDuringSchedulingIgnoredDuringExecution: {

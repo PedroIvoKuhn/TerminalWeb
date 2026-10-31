@@ -119,6 +119,22 @@ A realização dos testes no cluster híbrido sob duas configurações de nuvem 
    - 2 VMs `t3.medium`: Custo de **$\text{US\$} 0,0832/\text{hora}$** ($\approx \text{R\$} 0,48/\text{h}$ — o dobro).
    - **Conclusão:** Para aplicações com transferência massiva de dados sobre a internet, duplicar o número de VMs remotas dobra o custo financeiro sem ganho perceptível de tempo. O modelo de **1 VM com vCPUs proporcionais** consolida-se como a arquitetura mais eficiente e econômica para a plataforma educacional.
 
+### 2.6 A Dinâmica do MTU (1200 vs. 1440) e o Efeito Straggler na Heterogeneidade do Cluster Local
+A comparação metódica entre o comportamento do cluster on-premise antes e após a integração com o *cloud bursting* híbrido revelou dois compromissos fundamentais de engenharia de sistemas distribuídos:
+
+1. **A Necessidade do Duplo Encapsulamento (*Overlay-over-Overlay*) e a Harmonização do MTU:**
+   - **O Limite da WAN e da Interface VPN:** Em redes Ethernet locais convencionais, o MTU padrão é de $1500$ bytes, permitindo ao Calico CNI operar com MTU de $1440$ ou $1450$ bytes sobre VXLAN ($50$ bytes de cabeçalho). Entretanto, para transitar com segurança por provedores de Internet pública, firewalls de borda institucional e conexões com IPv6/CGNAT sem fragmentação destrutiva, a interface `tailscale0` adota o MTU seguro de $1280$ bytes.
+   - **Prevenção do Descarte Silencioso (*Black Hole Dropping*):** Se o Calico mantivesse seu MTU em $1440$ bytes, os pacotes dos pods sofreriam duplo encapsulamento (Payload + VXLAN + WireGuard), atingindo $\approx 1570$ bytes na saída do host. Esse valor excederia o MTU do túnel ($1280$ B) e o teto da Internet ($1500$ B), provocando o descarte silencioso de pacotes grandes: conexões SSH interativas congelavam durante o handshake e execuções OpenMPI travavam indefinidamente no `MPI_Bcast`.
+   - **O Padrão de 1200 Bytes:** Para viabilizar a coexistência harmônica entre Calico VXLAN e Tailscale WireGuard, o MTU da malha foi fixado em $1200$ bytes ($1280\text{ B} - 50\text{ B de VXLAN} - 30\text{ B de margem de segurança}$).
+
+2. **Decomposição do Impacto Experimental (MTU vs. Processador):**
+   - **Sensibilidade em Cargas de Rede (`mpi_heat2d`):** O MTU reduzido impactou diretamente as sincronizações de alta frequência ($1,664 \pm 0,007$ s no cluster local nativo em MTU 1500 versus $2,25 \pm 0,02$ s com MTU 1200). Como a difusão térmica realiza **800 iterações** sucessivas de troca de bordas (*halo exchange*), pacotes com teto de $1200$ bytes demandam maior segmentação TCP/IP e elevam o volume agregado de cabeçalhos por segundo.
+   - **Insensibilidade do MTU em Cargas de CPU (`mpi_matmul`):** Na multiplicação de matrizes, a comunicação ocorre apenas na distribuição e coleta dos blocos, consumindo fração residual do tempo total ($< 0,1$ s na LAN). A variação temporal observada ($5,440 \pm 0,042$ s no teste preliminar com 2 nós i7 versus $7,04 \pm 0,07$ s com 4 nós físicos distintos) foi **95% causada pelo Efeito Straggler (*Straggler Effect*)**:
+     - No teste de $5,44$ s, os 4 processos rodaram nas duas máquinas Core i7 (`ubuntu10` e `ubuntu11`), operando sob arquitetura 100% simétrica de alto clock ($3,4$ a $3,8$ GHz Turbo) e 8 MB de cache L3 por máquina.
+     - No teste de $7,04$ s, o escalonador espalhou os 4 pods em 4 máquinas físicas distintas via `podAntiAffinity`, alocando 2 processos em nós Core i5 (`ubuntu00` e `ubuntu03`). Os nós i5 possuem menor clock e 25% menos cache L3 para colunas de matrizes.
+     - Como a diretiva `MPI_Gather` impõe uma barreira síncrona bloqueante, os nós i7 concluíram suas 700 linhas em $\approx 3,5$ s, mas foram forçados a permanecer em espera ociosa até que os nós i5 concluíssem o processamento de suas 700 linhas em $\approx 6,9$ s.
+   - **Lição Arquitetural:** Em computação distribuída síncrona com partição uniforme de carga, o tempo total é invariavelmente ditado pelo elemento mais lento da malha ($T_{\text{total}} = \max(T_i)$). A redução do MTU para 1200 bytes constitui o compromisso técnico indispensável para viabilizar a elasticidade híbrida, preservando a estabilidade e o isolamento de rede sem degradar tarefas dominadas por computação.
+
 ---
 
 ## 3. Texto em LaTeX Pronto para a Monografia (Seção 6.3)
@@ -171,6 +187,8 @@ Em contrapartida, no cenário Híbrido, a execução com 2 processos (composto p
 
 Considerando a taxa de enlace de subida da infraestrutura acadêmica de aproximadamente $2,6$~MB/s, o tempo consumido exclusivamente pelo transporte de pacotes totaliza cerca de $48$ segundos. Somando-se o tempo computacional das vCPUs ($\approx 6$ s), comprova-se analiticamente a convergência com os tempos cronometrados. Conforme detalhado na Tabela~\ref{tab:benchmark_matmul}, a dispersão de 4 processos entre 2 VMs na nuvem ($52,56$ s) não proporcionou redução temporal frente ao uso de 1 VM ($50,45$ s), pois o gargalo reside na capacidade de transmissão do enlace de saída do laboratório.
 
+A comparação com execuções no laboratório local evidenciou também a sensibilidade à heterogeneidade de hardware: enquanto o agendamento concentrado nos servidores Intel Core i7 alcançou $5,44$~s em $np=4$, a dispersão dos contêineres por quatro nós físicos distintos contendo processadores Intel Core i5 registrou tempos de $7,04$~s. Como o algoritmo impõe particionamento estático e barreira coletiva síncrona (\texttt{MPI\_Gather}), o tempo global da malha foi estritamente delimitado pela velocidade do nó retardatário (\textit{straggler effect}), comprovando empiricamente que a homogeneidade de microarquitetura é fator crítico para a escalabilidade de algoritmos síncronos.
+
 \subsection{Carga Intensiva em Comunicação: Difusão de Calor 2D}
 \label{subsec:carga_network_bound}
 
@@ -210,6 +228,8 @@ Na Nuvem Pura, as trocas síncronas de bordas (\textit{Halo Exchange}) ocorreram
 Por outro lado, no cenário Híbrido, as 800 sincronizações temporais foram penalizadas de forma cumulativa pelo tempo de trânsito da VPN ($\approx 22,3$~ms de RTT entre Pelotas e São Paulo). Cada iteração acumulou aproximadamente $10,9$~ms de espera passiva da CPU aguardando a chegada dos pacotes de contorno, agregando cerca de $8,7$ segundos de overhead de rede aos $5,0$ segundos de cálculo base. 
 
 Diferente da multiplicação de matrizes, a alocação de 2 VMs na nuvem proporcionou ganho mensurável na difusão de calor ($12,02$ s contra $12,95$ s em $np=4$). Como as mensagens de contorno térmico envolvem pequenos volumes de dados (poucos kilobytes por passo temporal), o canal WAN não foi saturado. O isolamento de cada processo em uma VM dedicada eliminou a disputa de barramento de memória e caches L2/L3 entre pods remotos, acelerando o processamento local entre as sincronizações.
+
+Cabe destacar o compromisso arquitetural imposto pela harmonização do MTU da malha CNI. Para prevenir o descarte silencioso (\textit{black hole dropping}) decorrente do duplo encapsulamento (Calico VXLAN sobre WireGuard/Tailscale) em enlaces WAN com limite de 1500 bytes, o MTU do overlay foi reduzido de 1440 para 1200 bytes. Essa restrição introduziu uma sobrecarga marginal em cargas altamente iterativas como a difusão de calor (na qual pacotes menores geram mais segmentações TCP por iteração, elevando o tempo local de 1,66~s para 2,25~s em $np=4$), mas assegurou a integridade das conexões SSH e a performance plena das cargas dominadas por processamento aritmético.
 
 
 \subsection{Qualidade de Experiência no Terminal Interativo (QoE)}

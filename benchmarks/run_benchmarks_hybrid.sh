@@ -254,3 +254,4 @@ BEGIN {
 echo "=========================================================="
 echo " Bateria concluída com sucesso! Dados prontos para o TCC."
 echo "=========================================================="
+
