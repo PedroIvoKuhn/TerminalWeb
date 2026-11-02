@@ -34,15 +34,24 @@ mpicc -O3 -Wall mpi_heat2d.c -o mpi_heat2d -lm
 echo "-> Binários gerados com sucesso."
 echo ""
 
-# Verifica se foi passado um hostfile/hosts
+# Verifica se foi passado um hostfile/hosts ou detecta automaticamente via ~/.ssh/config
+TARGET_HOSTS="${1:-}"
+if [ -z "$TARGET_HOSTS" ]; then
+    DETECTED=$(grep -E '^Host (master|worker-[0-9]+) ' ~/.ssh/config 2>/dev/null | awk '{print $2}' | paste -sd, - || true)
+    if [ -n "$DETECTED" ]; then
+        TARGET_HOSTS="$DETECTED"
+        echo "Hosts detectados automaticamente a partir de ~/.ssh/config: $TARGET_HOSTS"
+    fi
+fi
+
 HOSTS_PARAM=""
-if [ -n "$1" ]; then
-    HOSTS_PARAM="-H $1"
-    echo "Usando hosts/slots especificados: $1"
+if [ -n "$TARGET_HOSTS" ]; then
+    HOSTS_PARAM="-H $TARGET_HOSTS"
+    echo "Usando hosts/slots especificados: $TARGET_HOSTS"
     
     # Sincroniza os binários e configuração MCA com os nós trabalhadores via SCP
     echo "Sincronizando binários e configuração MCA com os nós remotos via SSH..."
-    IFS=',' read -ra ADDR <<< "$1"
+    IFS=',' read -ra ADDR <<< "$TARGET_HOSTS"
     for host in "${ADDR[@]}"; do
         clean_host=$(echo "$host" | cut -d: -f1 | tr -d ' ')
         if [ "$clean_host" != "master" ] && [ "$clean_host" != "localhost" ] && [ -n "$clean_host" ]; then
@@ -55,7 +64,7 @@ if [ -n "$1" ]; then
     echo "-> Sincronização concluída com sucesso."
     echo ""
 else
-    echo "Aviso: Nenhum host especificado via \$1. Executando localmente no Pod mestre."
+    echo "Aviso: Nenhum host especificado ou detectado. Executando localmente no Pod mestre."
 fi
 
 # Define os processos a testar (padrão: 1 2 4, ou o valor passado em $2)
@@ -101,8 +110,8 @@ for np in $PROCESS_LIST; do
     
     # Determina o subconjunto exato de hosts para o np atual
     CURRENT_HOSTS_FLAG=""
-    if [ -n "$1" ]; then
-        CURRENT_HOSTS=$(get_hosts_for_np "$np" "$1")
+    if [ -n "$TARGET_HOSTS" ]; then
+        CURRENT_HOSTS=$(get_hosts_for_np "$np" "$TARGET_HOSTS")
         CURRENT_HOSTS_FLAG="-H $CURRENT_HOSTS"
         if [ "$np" -eq 2 ] && [ "$CURRENT_HOSTS" = "master,worker-2" ]; then
             echo "Hosts ativos para np=$np: $CURRENT_HOSTS (pareamento híbrido Local + Nuvem)"
@@ -140,8 +149,8 @@ for np in $PROCESS_LIST; do
     
     # Determina o subconjunto exato de hosts para o np atual
     CURRENT_HOSTS_FLAG=""
-    if [ -n "$1" ]; then
-        CURRENT_HOSTS=$(get_hosts_for_np "$np" "$1")
+    if [ -n "$TARGET_HOSTS" ]; then
+        CURRENT_HOSTS=$(get_hosts_for_np "$np" "$TARGET_HOSTS")
         CURRENT_HOSTS_FLAG="-H $CURRENT_HOSTS"
         if [ "$np" -eq 2 ] && [ "$CURRENT_HOSTS" = "master,worker-2" ]; then
             echo "Hosts ativos para np=$np: $CURRENT_HOSTS (pareamento híbrido Local + Nuvem)"

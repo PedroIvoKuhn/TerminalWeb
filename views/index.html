@@ -47,12 +47,14 @@
         <p>Cada sessão tem um tempo máximo de 2 horas</p>
         <p id="setup-machines-desc">Quantos nós (máquinas) você deseja para sua aplicação?</p>
         <form id="setup-form">
-            <span id="local-machines-label" style="display: none; color: #fff; margin-right: 5px;">Máquinas locais:</span>
+            <span id="local-machines-label" style="display: none; color: #fff; margin-right: 5px;">Máquinas
+                locais:</span>
             <input type="number" id="num-machines" value="1" min="1" max="10" required title="Máquinas locais">
 
             <span id="remote-machines-container" style="display: none;">
                 <label for="num-remote-machines" style="color: #fff; margin-right: 5px;">Máquinas remotas:</label>
-                <input type="number" id="num-remote-machines" value="1" min="0" max="10" required title="Máquinas remotas">
+                <input type="number" id="num-remote-machines" value="1" min="0" max="10" required
+                    title="Máquinas remotas">
             </span>
 
             <select id="select-backup">
@@ -60,7 +62,8 @@
             </select>
             <button class="init-terminal" id="btn-init-terminal" type="submit">Iniciar Terminal</button>
         </form>
-        <div id="hybrid-error-alert" style="display: none; color: #ff5555; margin-top: 10px; font-weight: 500; font-size: 0.9rem;"></div>
+        <div id="hybrid-error-alert"
+            style="display: none; color: #ff5555; margin-top: 10px; font-weight: 500; font-size: 0.9rem;"></div>
 
         <div class="setup-burst-banner">
             <span>💡 Deseja mais processamento?</span>
@@ -390,7 +393,7 @@
                                 <label for="azure-input-vm-size">Tamanho da VM</label>
                                 <select id="azure-input-vm-size" class="cloud-input-field">
                                     <option value="Standard_B2ats_v2">Standard_B2ats_v2 (2vCPU, 2GB) ($0.02/h)</option>
-                                    <option value="Standard_B2s">Standard_B2s (2vCPU, 4GB) ($0.04/h)</option>
+                                    <option value="Standard_B2als_v2">Standard_B2als_v2 (2vCPU, 4GB) ($0.05/h)</option>
                                     <option value="Standard_B1s">Standard_B1s (1vCPU, 1GB) ($0.01/h)</option>
                                 </select>
                             </div>

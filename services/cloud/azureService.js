@@ -171,6 +171,8 @@ update-alternatives --set iptables /usr/sbin/iptables-legacy || true
 update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy || true
 
 if command -v ufw &>/dev/null; then
+    ufw allow 41641/udp 2>/dev/null || true
+    ufw allow 4789/udp 2>/dev/null || true
     ufw allow in on tailscale0 to any port 4789 proto udp 2>/dev/null || true
     ufw route allow in on tailscale0 out on cali+ 2>/dev/null || true
     ufw route allow in on cali+ out on tailscale0 2>/dev/null || true
@@ -224,9 +226,12 @@ apply_rules() {
             $ipt -t nat -A POSTROUTING -o tailscale0 -j MASQUERADE 2>/dev/null || true
         fi
 
-        # 5. Permite tráfego UDP 4789 (VXLAN) vindo da interface tailscale0
-        if ! $ipt -C INPUT -i tailscale0 -p udp --dport 4789 -j ACCEPT 2>/dev/null; then
-            $ipt -I INPUT 1 -i tailscale0 -p udp --dport 4789 -j ACCEPT 2>/dev/null || true
+        # 5. Permite tráfego UDP 41641 (WireGuard) e UDP 4789 (VXLAN) para conexão direta P2P na VNet
+        if ! $ipt -C INPUT -p udp --dport 41641 -j ACCEPT 2>/dev/null; then
+            $ipt -I INPUT 1 -p udp --dport 41641 -j ACCEPT 2>/dev/null || true
+        fi
+        if ! $ipt -C INPUT -p udp --dport 4789 -j ACCEPT 2>/dev/null; then
+            $ipt -I INPUT 1 -p udp --dport 4789 -j ACCEPT 2>/dev/null || true
         fi
 
         # 6. Permite FORWARD bidirecional entre tailscale0 e as interfaces Calico (cali+ e vxlan.calico)
@@ -269,7 +274,8 @@ for ipt in iptables-legacy iptables; do
     $ipt -t nat -A OUTPUT -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
     $ipt -t nat -A PREROUTING -d 10.220.107.0/24 -p tcp --dport 16443 -j DNAT --to-destination ${masterHost}:16443 2>/dev/null || true
     $ipt -t nat -A POSTROUTING -o tailscale0 -j MASQUERADE 2>/dev/null || true
-    $ipt -I INPUT 1 -i tailscale0 -p udp --dport 4789 -j ACCEPT 2>/dev/null || true
+    $ipt -I INPUT 1 -p udp --dport 41641 -j ACCEPT 2>/dev/null || true
+    $ipt -I INPUT 1 -p udp --dport 4789 -j ACCEPT 2>/dev/null || true
     $ipt -I OUTPUT 1 -d 10.1.0.0/16 -p udp --dport 41641 -j DROP 2>/dev/null || true
     $ipt -I OUTPUT 1 -o vxlan.calico -p udp --dport 41641 -j DROP 2>/dev/null || true
     for iface in cali+ vxlan.calico; do
