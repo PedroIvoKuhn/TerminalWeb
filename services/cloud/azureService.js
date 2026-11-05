@@ -93,6 +93,55 @@ async function ensureInfrastructure(ctx) {
         // VNet ainda não existe
     }
 
+    // Garante Network Security Group (NSG) liberando UDP 41641 (Tailscale WireGuard) e UDP 4789 (Calico VXLAN)
+    const nsgName = `BurstNSG-${ctx.location}`;
+    let nsg = null;
+    try {
+        console.log(`-> Garantindo Network Security Group '${nsgName}' em '${ctx.location}'...`);
+        nsg = await ctx.networkClient.networkSecurityGroups.beginCreateOrUpdateAndWait(ctx.resourceGroupName, nsgName, {
+            location: ctx.location,
+            securityRules: [
+                {
+                    name: 'Allow-WireGuard-Tailscale',
+                    protocol: 'Udp',
+                    sourcePortRange: '*',
+                    destinationPortRange: '41641',
+                    sourceAddressPrefix: '*',
+                    destinationAddressPrefix: '*',
+                    access: 'Allow',
+                    direction: 'Inbound',
+                    priority: 1000
+                },
+                {
+                    name: 'Allow-VXLAN-Calico',
+                    protocol: 'Udp',
+                    sourcePortRange: '*',
+                    destinationPortRange: '4789',
+                    sourceAddressPrefix: '*',
+                    destinationAddressPrefix: '*',
+                    access: 'Allow',
+                    direction: 'Inbound',
+                    priority: 1010
+                },
+                {
+                    name: 'Allow-SSH',
+                    protocol: 'Tcp',
+                    sourcePortRange: '*',
+                    destinationPortRange: '22',
+                    sourceAddressPrefix: '*',
+                    destinationAddressPrefix: '*',
+                    access: 'Allow',
+                    direction: 'Inbound',
+                    priority: 1020
+                }
+            ]
+        });
+        console.log(`[SUCESSO] NSG '${nsgName}' configurado com sucesso.`);
+        ctx.nsg = nsg;
+    } catch (nsgErr) {
+        console.warn(`[AZURE AVISO] Erro ao criar NSG: ${nsgErr.message}`);
+    }
+
     await ctx.networkClient.virtualNetworks.beginCreateOrUpdateAndWait(ctx.resourceGroupName, ctx.vnetName, {
         location: ctx.location,
         addressSpace: {
@@ -100,9 +149,14 @@ async function ensureInfrastructure(ctx) {
         }
     });
 
-    await ctx.networkClient.subnets.beginCreateOrUpdateAndWait(ctx.resourceGroupName, ctx.vnetName, ctx.subnetName, {
+    const subnetParams = {
         addressPrefix: '10.0.0.0/24'
-    });
+    };
+    if (nsg && nsg.id) {
+        subnetParams.networkSecurityGroup = { id: nsg.id };
+    }
+
+    await ctx.networkClient.subnets.beginCreateOrUpdateAndWait(ctx.resourceGroupName, ctx.vnetName, ctx.subnetName, subnetParams);
 }
 
 function buildUserDataScript(joinCommand = '', tailscaleKey = process.env.TAILSCALE_AUTH_KEY, nodeName = '', imageToPreload = null) {
@@ -152,7 +206,17 @@ curl -fsSL https://tailscale.com/install.sh | sh
 `;
 
     if (tailscaleKey) {
-        script += `tailscale up --authkey=${tailscaleKey} ${nodeName ? `--hostname=${nodeName}` : ''} --accept-routes --ssh\n`;
+        script += `
+# Força porta UDP 41641 fixa no Tailscale para coincidir com o NSG/Firewall e viabilizar P2P direto
+mkdir -p /etc/default
+cat << 'EOF_TS' > /etc/default/tailscaled
+PORT="41641"
+EOF_TS
+systemctl restart tailscaled || true
+sleep 2
+
+tailscale up --authkey=${tailscaleKey} ${nodeName ? `--hostname=${nodeName}` : ''} --accept-routes --ssh
+`;
         script += `
 # Aguarda IP do Tailscale ser configurado na interface
 TS_IP=""
@@ -169,6 +233,10 @@ done
 echo "--- Configurando iptables-legacy ---"
 update-alternatives --set iptables /usr/sbin/iptables-legacy || true
 update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy || true
+
+# Clampa MSS para evitar drops por fragmentação de pacotes grandes TCP sobre VXLAN/WireGuard
+iptables-legacy -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
 
 if command -v ufw &>/dev/null; then
     ufw allow 41641/udp 2>/dev/null || true
@@ -437,21 +505,35 @@ async function addNode(joinCommand = '', credentials = {}, options = {}) {
     console.log(`-> Criando Interface de Rede (NIC): ${nicName} com IP Público ${publicIp.name}...`);
     const subnet = await ctx.networkClient.subnets.get(ctx.resourceGroupName, ctx.vnetName, ctx.subnetName);
 
+    const nicParams = {
+        location: ctx.location,
+        ipConfigurations: [{
+            name: 'ipconfig1',
+            subnet: { id: subnet.id },
+            publicIPAddress: { id: publicIp.id }
+        }],
+        tags: {
+            Role: "CloudBurstingWorker",
+            ManagedBy: "TerminalWeb",
+            NodeId: nodeId
+        }
+    };
+
+    // Associa o Network Security Group diretamente à NIC para liberação imediata das portas UDP 41641/4789
+    if (ctx.nsg && ctx.nsg.id) {
+        nicParams.networkSecurityGroup = { id: ctx.nsg.id };
+    } else {
+        try {
+            const nsgObj = await ctx.networkClient.networkSecurityGroups.get(ctx.resourceGroupName, `BurstNSG-${ctx.location}`);
+            if (nsgObj && nsgObj.id) {
+                nicParams.networkSecurityGroup = { id: nsgObj.id };
+            }
+        } catch (_) {}
+    }
+
     let nic;
     try {
-        nic = await ctx.networkClient.networkInterfaces.beginCreateOrUpdateAndWait(ctx.resourceGroupName, nicName, {
-            location: ctx.location,
-            ipConfigurations: [{
-                name: 'ipconfig1',
-                subnet: { id: subnet.id },
-                publicIPAddress: { id: publicIp.id }
-            }],
-            tags: {
-                Role: "CloudBurstingWorker",
-                ManagedBy: "TerminalWeb",
-                NodeId: nodeId
-            }
-        });
+        nic = await ctx.networkClient.networkInterfaces.beginCreateOrUpdateAndWait(ctx.resourceGroupName, nicName, nicParams);
     } catch (nicErr) {
         // Se a criação da NIC falhar, exclui o IP público para não gerar cobrança residual
         claimedIpNames.delete(publicIp.name);

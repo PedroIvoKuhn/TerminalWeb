@@ -4,7 +4,10 @@ const {
     TerminateInstancesCommand, 
     DescribeInstancesCommand, 
     DescribeImagesCommand,
-    GetCallerIdentityCommand 
+    GetCallerIdentityCommand,
+    DescribeSecurityGroupsCommand,
+    CreateSecurityGroupCommand,
+    AuthorizeSecurityGroupIngressCommand
 } = require("@aws-sdk/client-ec2");
 const { STSClient, GetCallerIdentityCommand: STSGetCallerIdentityCommand } = require("@aws-sdk/client-sts");
 
@@ -63,6 +66,80 @@ async function validateCredentials(credentials = {}) {
             error: error.message
         };
     }
+}
+
+async function ensureSecurityGroup(client) {
+    const groupName = 'terminalweb-burst-sg';
+    let groupId = null;
+
+    try {
+        const describeRes = await client.send(new DescribeSecurityGroupsCommand({
+            GroupNames: [groupName]
+        }));
+        if (describeRes.SecurityGroups && describeRes.SecurityGroups.length > 0) {
+            groupId = describeRes.SecurityGroups[0].GroupId;
+        }
+    } catch (err) {
+        if (err.name !== 'InvalidGroup.NotFound') {
+            console.warn(`[AWS SG] Aviso ao consultar Security Group '${groupName}':`, err.message);
+        }
+    }
+
+    if (!groupId) {
+        try {
+            console.log(`-> Criando Security Group '${groupName}' na AWS...`);
+            const createRes = await client.send(new CreateSecurityGroupCommand({
+                GroupName: groupName,
+                Description: 'Security Group for TerminalWeb Cloud Bursting nodes (UDP 41641 WireGuard and UDP 4789 Calico)'
+            }));
+            groupId = createRes.GroupId;
+            console.log(`[SUCESSO] Security Group criado com ID: ${groupId}`);
+        } catch (createErr) {
+            if (createErr.name === 'InvalidGroup.Duplicate') {
+                const describeRes = await client.send(new DescribeSecurityGroupsCommand({
+                    GroupNames: [groupName]
+                }));
+                groupId = describeRes.SecurityGroups[0].GroupId;
+            } else {
+                console.warn(`[AWS SG] Não foi possível criar Security Group dedicado: ${createErr.message}`);
+                return null;
+            }
+        }
+    }
+
+    // Garante as regras de Ingress para WireGuard P2P direto e Calico VXLAN
+    try {
+        await client.send(new AuthorizeSecurityGroupIngressCommand({
+            GroupId: groupId,
+            IpPermissions: [
+                {
+                    IpProtocol: 'udp',
+                    FromPort: 41641,
+                    ToPort: 41641,
+                    IpRanges: [{ CidrIp: '0.0.0.0/0', Description: 'Tailscale WireGuard Direct P2P' }]
+                },
+                {
+                    IpProtocol: 'udp',
+                    FromPort: 4789,
+                    ToPort: 4789,
+                    IpRanges: [{ CidrIp: '0.0.0.0/0', Description: 'Calico VXLAN Overlay' }]
+                },
+                {
+                    IpProtocol: 'tcp',
+                    FromPort: 22,
+                    ToPort: 22,
+                    IpRanges: [{ CidrIp: '0.0.0.0/0', Description: 'SSH Administration' }]
+                }
+            ]
+        }));
+        console.log(`[AWS SG] Regras de Ingress (UDP 41641, UDP 4789, TCP 22) aplicadas ao grupo ${groupId}.`);
+    } catch (ruleErr) {
+        if (ruleErr.name !== 'InvalidPermission.Duplicate') {
+            console.warn(`[AWS SG] Aviso ao autorizar portas no SG: ${ruleErr.message}`);
+        }
+    }
+
+    return groupId;
 }
 
 async function getLatestUbuntuAmi(client) {
@@ -134,7 +211,17 @@ curl -fsSL https://tailscale.com/install.sh | sh
 
     if (tailscaleKey) {
         const tsHostnameFlag = nodeName ? ` --hostname=${nodeName}` : '';
-        script += `tailscale up --authkey=${tailscaleKey}${tsHostnameFlag} --accept-routes --ssh\n`;
+        script += `
+# Força porta UDP 41641 fixa no Tailscale para coincidir com o Security Group e viabilizar P2P direto
+mkdir -p /etc/default
+cat << 'EOF_TS' > /etc/default/tailscaled
+PORT="41641"
+EOF_TS
+systemctl restart tailscaled || true
+sleep 2
+
+tailscale up --authkey=${tailscaleKey}${tsHostnameFlag} --accept-routes --ssh
+`;
         script += `
 # Aguarda IP do Tailscale ser configurado na interface
 TS_IP=""
@@ -151,6 +238,10 @@ done
 echo "--- Configurando iptables-legacy ---"
 update-alternatives --set iptables /usr/sbin/iptables-legacy || true
 update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy || true
+
+# Clampa MSS para evitar drops por fragmentação de pacotes grandes TCP sobre VXLAN/WireGuard
+iptables-legacy -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
 
 if command -v ufw &>/dev/null; then
     ufw allow 41641/udp 2>/dev/null || true
@@ -406,6 +497,15 @@ async function addNode(joinCommand = '', credentials = {}, options = {}) {
 
     if (keyPairName) {
         params.KeyName = keyPairName;
+    }
+
+    try {
+        const securityGroupId = await ensureSecurityGroup(client);
+        if (securityGroupId) {
+            params.SecurityGroupIds = [securityGroupId];
+        }
+    } catch (sgErr) {
+        console.warn(`[AWS SG] Falha ao configurar Security Group dedicado: ${sgErr.message}`);
     }
 
     try {
