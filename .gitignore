@@ -102,8 +102,13 @@ web_modules/
 # Output of 'npm pack'
 *.tgz
 
-# Yarn Integrity file
-.yarn-integrity
+# C / MPI Benchmarks binaries and output results
+benchmarks/mpi_matmul
+benchmarks/mpi_heat2d
+benchmarks/resultados/*.csv
+benchmarks/resultados/*.log
+
+
 
 # dotenv environment variables file
 .env

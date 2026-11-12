@@ -1,37 +1,105 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Script de Execução Automatizada dos Benchmarks MPI (TCC - Pedro Ivo Kuhn)
-# Inclui cálculo automático de Média, Desvio Padrão, Speedup e Eficiência Paralela
+# Inclui:
+# - Exportação de Logs (.log) e Planilha (.csv) pronta para Google Planilhas
+# - Cooldown anti-throttling térmico e recomposição de créditos de CPU na nuvem
+# - Decomposição Granular de Tempos (Rede, Computação e Straggler)
+# - Cálculo automático de Média, Desvio Padrão, IC 95%, Speedup e Eficiência
 # ==============================================================================
 
-# Suprime avisos do OpenSSH e configura MCA para rede de Pods Calico CNI
+# Suprime avisos do OpenSSH e configura MCA para rede de Pods Calico CNI e VPN WAN Tailscale
 export OMPI_MCA_plm_rsh_args="-o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 export OMPI_MCA_btl_tcp_if_include="eth0"
 export OMPI_MCA_oob_tcp_if_include="eth0"
 export OMPI_MCA_mpi_yield_when_idle="1"
+export OMPI_MCA_btl_tcp_sndbuf="4194304"
+export OMPI_MCA_btl_tcp_rcvbuf="4194304"
 
 # Garante arquivo de configuracao MCA local para o usuário aluno
-mkdir -p "$HOME/.openmpi"
-cat << 'EOF' > "$HOME/.openmpi/mca-params.conf"
+mkdir -p "${HOME:-/home/aluno}/.openmpi" 2>/dev/null || true
+cat << 'EOF' > "${HOME:-/home/aluno}/.openmpi/mca-params.conf" 2>/dev/null || true
 btl_tcp_if_include = eth0
 oob_tcp_if_include = eth0
 mpi_yield_when_idle = 1
+btl_tcp_sndbuf = 4194304
+btl_tcp_rcvbuf = 4194304
 EOF
 
-REPS=5 # Número de repetições para cada configuração
-TMP_DIR=$(mktemp -d /tmp/mpi_benchmarks_XXXXXX)
+# ------------------------------------------------------------------------------
+# Configuração de Logs e Arquivo CSV para o Google Planilhas
+# ------------------------------------------------------------------------------
+RESULTS_DIR="${RESULTS_DIR:-$(pwd)/resultados}"
+mkdir -p "$RESULTS_DIR"
 
+if [ -z "$BENCH_TAG" ]; then
+    DEFAULT_TAG="ensaio_$(date +%Y%m%d_%H%M%S)"
+    if [ -t 0 ]; then
+        echo "=========================================================="
+        echo "        CONFIGURAÇÃO DO ENSAIO DE BENCHMARK MPI           "
+        echo "=========================================================="
+        read -r -p "Identificador deste ensaio (ex: local_puro, nuvem_aws, nuvem_azure) [padrão: $DEFAULT_TAG]: " USER_INPUT
+        BENCH_TAG="${USER_INPUT:-$DEFAULT_TAG}"
+    else
+        BENCH_TAG="$DEFAULT_TAG"
+    fi
+fi
+# Sanitiza o nome para evitar caracteres inválidos em arquivo
+BENCH_TAG=$(echo "$BENCH_TAG" | tr -c '[:alnum:]_-' '_')
+
+LOG_FILE="$RESULTS_DIR/${BENCH_TAG}_execucao.log"
+CSV_FILE="$RESULTS_DIR/${BENCH_TAG}_amostras.csv"
+RESUMO_CSV="$RESULTS_DIR/${BENCH_TAG}_resumo.csv"
+
+# Redireciona stdout e stderr para tela e arquivo de log simultaneamente
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "=========================================================="
+echo "        BATERIA DE TESTES DE DESEMPENHO MPI (TCC)         "
+echo "=========================================================="
+echo "Identificador do Ensaio: $BENCH_TAG"
+echo "Log completo da execução: $LOG_FILE"
+echo "Amostras para Google Planilhas: $CSV_FILE"
+echo "Resumo consolidado: $RESUMO_CSV"
+echo "=========================================================="
+echo ""
+
+# Inicializa o cabeçalho do arquivo CSV de amostras
+echo "cenario,carga,iteracao,np,N,t_total,t_rede,t_bcast,t_scatter,t_gather,t_comp_max,t_comp_min,t_straggler_wait" > "$CSV_FILE"
+
+# Parâmetros de execução (Sobrescrevíveis via variáveis de ambiente)
+MATMUL_N="${MATMUL_N:-4800}"        # Dimensão da matriz quadrada (N x N)
+MATMUL_REPS="${MATMUL_REPS:-30}"    # 30 repetições para rigor estatístico do TCC
+HEAT_REPS="${HEAT_REPS:-5}"         # Repetições para Network-Bound
+COOLDOWN_SECS="${COOLDOWN_SECS:-5}" # Segundos de repouso anti-throttling térmico/créditos
+
+TMP_DIR=$(mktemp -d /tmp/mpi_benchmarks_XXXXXX)
 trap "rm -rf $TMP_DIR" EXIT
 
-echo "=========================================================="
-echo "        BATERIA DE TESTES DE DESEMPENHO MPI               "
-echo "=========================================================="
+# Função de cooldown para resfriamento de CPU e recomposição de rajada
+cooldown() {
+    local secs="${1:-$COOLDOWN_SECS}"
+    if [ "$secs" -gt 0 ]; then
+        echo "-> [Cooldown] Pausa de ${secs}s para resfriamento térmico e alívio de créditos de CPU..."
+        sleep "$secs"
+    fi
+}
 
-# 1. Compilação com otimização -O3
-echo "[1/3] Compilando algoritmos com mpicc -O3..."
-mpicc -O3 -Wall mpi_matmul.c -o mpi_matmul -lm
+# 1. Compilação Multi-Arquitetura Otimizada
+# -O3 -mavx2 -mfma -funroll-loops para Intel Xeon Sapphire Rapids / AMD EPYC
+# com detecção segura para evitar SIGILL em nós Core i7 Sandy Bridge (i7-2600 local)
+echo "[1/3] Compilando algoritmos..."
+if grep -q "avx2" /proc/cpuinfo 2>/dev/null && grep -q "fma" /proc/cpuinfo 2>/dev/null; then
+    MATMUL_ARCH_FLAGS="-mavx2 -mfma"
+elif grep -q "avx" /proc/cpuinfo 2>/dev/null; then
+    MATMUL_ARCH_FLAGS="-mavx"
+else
+    MATMUL_ARCH_FLAGS=""
+fi
+
+mpicc -O3 $MATMUL_ARCH_FLAGS -funroll-loops -Wall mpi_matmul.c -o mpi_matmul -lm
 mpicc -O3 -Wall mpi_heat2d.c -o mpi_heat2d -lm
-echo "-> Binários gerados com sucesso."
+echo "-> Binários gerados com sucesso (Flags Matmul: -O3 $MATMUL_ARCH_FLAGS -funroll-loops + IFUNC multi-arch)."
 echo ""
 
 # Verifica se foi passado um hostfile/hosts ou detecta automaticamente via ~/.ssh/config
@@ -76,13 +144,13 @@ fi
 echo "Processos a avaliar (np): $PROCESS_LIST"
 echo ""
 
-# 2. Testes CPU-Bound (Multiplicação de Matrizes N=2800)
+# 2. Testes CPU-Bound (Multiplicação de Matrizes N=4800, 30 Repetições com Decomposição)
 echo "=========================================================="
-echo " [2/3] Executando Carga CPU-Bound (mpi_matmul N=2800)"
+echo " [2/3] Executando Carga CPU-Bound (mpi_matmul N=$MATMUL_N, REPS=$MATMUL_REPS)"
 echo "=========================================================="
 
 for np in $PROCESS_LIST; do
-    echo "--- Testando com np=$np ($REPS repetições) ---"
+    echo "--- Testando Carga CPU-Bound com np=$np ($MATMUL_REPS repetições internas + warm-up) ---"
     
     # Determina o subconjunto exato de hosts para o np atual
     CURRENT_HOSTS_FLAG=""
@@ -99,32 +167,45 @@ for np in $PROCESS_LIST; do
         echo "Hosts ativos para np=$np: $CURRENT_HOSTS"
     fi
 
-    for r in $(seq 1 $REPS); do
-        OUT=$(mpirun --allow-run-as-root --oversubscribe \
+    # Executa com tuning de socket TCP (4MB buffers para WAN BDP)
+    # mpi_matmul gerencia internamente o warm-up e as repetições
+    while IFS= read -r line; do
+        echo "$line"
+        if [[ "$line" == AMOSTRA_CPU_BOUND* ]]; then
+            SEC=$(echo "$line" | sed -n 's/.*t_total=\([0-9.]*\).*/\1/p')
+            if [ -n "$SEC" ]; then
+                echo "$SEC" >> "$TMP_DIR/matmul_np_${np}.txt"
+            fi
+            # Grava no CSV unificado para Google Planilhas
+            clean_vals=$(echo "$line" | sed 's/AMOSTRA_CPU_BOUND,//' | sed 's/[a-zA-Z0-9_]*=//g')
+            echo "${BENCH_TAG},cpu_bound,${clean_vals}" >> "$CSV_FILE"
+        elif [[ "$line" == RESUMO_ESTATISTICO* ]]; then
+            echo "$line" >> "$TMP_DIR/matmul_resumo_np_${np}.txt"
+        fi
+    done < <(mpirun --allow-run-as-root --oversubscribe \
              --mca plm_rsh_args "-o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
              --mca btl_tcp_if_include eth0 \
              --mca oob_tcp_if_include eth0 \
              --mca mpi_yield_when_idle 1 \
-             $CURRENT_HOSTS_FLAG -np $np ./mpi_matmul 2>/dev/null)
-        
-        echo "$OUT"
-        
-        # Extrai o tempo em segundos
-        SEC=$(echo "$OUT" | grep "RESULTADO_CPU_BOUND" | sed -n 's/.*tempo_segundos=\([0-9.]*\)/\1/p')
-        if [ -n "$SEC" ]; then
-            echo "$SEC" >> "$TMP_DIR/matmul_np_${np}.txt"
-        fi
-    done
-    echo ""
+             --mca btl_tcp_sndbuf 4194304 \
+             --mca btl_tcp_rcvbuf 4194304 \
+             $CURRENT_HOSTS_FLAG -np $np ./mpi_matmul $MATMUL_N $MATMUL_REPS 2>/dev/null)
+    
+    # Cooldown entre configurações de processo para resfriamento
+    cooldown "$COOLDOWN_SECS"
 done
+
+# Cooldown intermediário entre as baterias CPU-Bound e Network-Bound
+echo "Transição de fase: preparando carga Network-Bound..."
+cooldown 8
 
 # 3. Testes Network-Bound (Difusão de Calor 2D 2000x2000, 800 iterações)
 echo "=========================================================="
-echo " [3/3] Executando Carga Network-Bound (mpi_heat2d 2000x2000)"
+echo " [3/3] Executando Carga Network-Bound (mpi_heat2d 2000x2000, $HEAT_REPS repetições)"
 echo "=========================================================="
 
 for np in $PROCESS_LIST; do
-    echo "--- Testando com np=$np ($REPS repetições) ---"
+    echo "--- Testando Carga Network-Bound com np=$np ($HEAT_REPS repetições) ---"
     
     # Determina o subconjunto exato de hosts para o np atual
     CURRENT_HOSTS_FLAG=""
@@ -141,12 +222,14 @@ for np in $PROCESS_LIST; do
         echo "Hosts ativos para np=$np: $CURRENT_HOSTS"
     fi
 
-    for r in $(seq 1 $REPS); do
+    for r in $(seq 1 $HEAT_REPS); do
         OUT=$(mpirun --allow-run-as-root --oversubscribe \
              --mca plm_rsh_args "-o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
              --mca btl_tcp_if_include eth0 \
              --mca oob_tcp_if_include eth0 \
              --mca mpi_yield_when_idle 1 \
+             --mca btl_tcp_sndbuf 4194304 \
+             --mca btl_tcp_rcvbuf 4194304 \
              $CURRENT_HOSTS_FLAG -np $np ./mpi_heat2d 2>/dev/null)
         
         echo "$OUT"
@@ -155,9 +238,13 @@ for np in $PROCESS_LIST; do
         SEC=$(echo "$OUT" | grep "RESULTADO_NETWORK_BOUND" | sed -n 's/.*tempo_segundos=\([0-9.]*\)/\1/p')
         if [ -n "$SEC" ]; then
             echo "$SEC" >> "$TMP_DIR/heat_np_${np}.txt"
+            # Grava no CSV unificado
+            echo "${BENCH_TAG},network_bound,${r},${np},2000,${SEC},,,,,," >> "$CSV_FILE"
         fi
     done
-    echo ""
+    
+    # Cooldown entre configurações de processo
+    cooldown "$COOLDOWN_SECS"
 done
 
 # 4. Cálculo Estatístico (Média, Desvio Padrão, Speedup e Eficiência)
@@ -165,15 +252,19 @@ echo "=========================================================="
 echo "          RESUMO ESTATÍSTICO CONSOLIDADO DO TCC           "
 echo "=========================================================="
 
-awk -v procs="$PROCESS_LIST" -v tmp="$TMP_DIR" '
+awk -v procs="$PROCESS_LIST" -v tmp="$TMP_DIR" -v matmul_n="$MATMUL_N" -v matmul_reps="$MATMUL_REPS" -v tag="$BENCH_TAG" -v resumo_csv="$RESUMO_CSV" '
 BEGIN {
     n_procs = split(procs, plist, " ")
     
+    # Cabeçalho do CSV Resumo
+    print "cenario,carga,np,dimensao_N,repeticoes,tempo_medio_s,desvio_padrao_s,ic95_s,speedup,eficiencia_pct,media_rede_s,media_comp_max_s,media_straggler_s" > resumo_csv
+
     # ----------------------------------------------------
     # 1. Processa Carga CPU-Bound
     # ----------------------------------------------------
     delete means
     delete stds
+    delete ic95s
     for (idx = 1; idx <= n_procs; idx++) {
         p = plist[idx]
         file = tmp "/matmul_np_" p ".txt"
@@ -188,11 +279,12 @@ BEGIN {
             var = 0
             for (i = 1; i <= n; i++) var += (vals[i] - means[p])^2
             stds[p] = (n > 1) ? sqrt(var / (n - 1)) : 0
+            ic95s[p] = (n > 1) ? 1.96 * stds[p] / sqrt(n) : 0
         }
     }
     
     t1_matmul = (1 in means) ? means[1] : means[plist[1]]
-    print "\n=== 1. Carga CPU-Bound: Multiplicação de Matrizes (N=2800) ==="
+    printf "\n=== 1. Carga CPU-Bound: Multiplicação de Matrizes (N=%d, REPS=%d) ===\n", matmul_n, matmul_reps
     printf "%-5s | %-18s | %-10s | %-10s\n", "np", "Tempo Médio (s)", "Speedup", "Eficiência"
     print "------------------------------------------------------------"
     for (idx = 1; idx <= n_procs; idx++) {
@@ -203,12 +295,47 @@ BEGIN {
             printf "%-5d | %6.3f ± %5.3f s   | %8.2fx | %9.1f%%\n", p, means[p], stds[p], speedup, eff
         }
     }
+
+    # ----------------------------------------------------
+    # 1.1 Decomposição de Tempos CPU-Bound (Rede, Comp, Straggler)
+    # ----------------------------------------------------
+    printf "\n--- Decomposição Média de Tempos CPU-Bound (N=%d) ---\n", matmul_n
+    printf "%-5s | %-12s | %-12s | %-12s | %-12s\n", "np", "T_Total (s)", "T_Rede (s)", "T_CompMax(s)", "Straggler(s)"
+    print "------------------------------------------------------------------------"
+    for (idx = 1; idx <= n_procs; idx++) {
+        p = plist[idx]
+        res_file = tmp "/matmul_resumo_np_" p ".txt"
+        m_rede = 0; m_comp = 0; m_strag = 0
+        if ((getline line < res_file) > 0) {
+            split(line, fields, ",")
+            delete kv
+            for (f in fields) {
+                split(fields[f], pair, "=")
+                if (length(pair) == 2) kv[pair[1]] = pair[2]
+            }
+            m_rede = kv["media_rede"]
+            m_comp = kv["media_comp_max"]
+            m_strag = kv["media_straggler"]
+            printf "%-5d | %10.4f s | %10.4f s | %10.4f s | %10.4f s\n",
+                   p, kv["media_total"], m_rede, m_comp, m_strag
+        }
+        close(res_file)
+
+        # Grava no CSV Resumo
+        if (p in means) {
+            speedup = t1_matmul / means[p]
+            eff = (speedup / p) * 100
+            printf "%s,cpu_bound,%d,%d,%d,%.4f,%.4f,%.4f,%.2f,%.1f,%.4f,%.4f,%.4f\n",
+                   tag, p, matmul_n, matmul_reps, means[p], stds[p], ic95s[p], speedup, eff, m_rede, m_comp, m_strag >> resumo_csv
+        }
+    }
     
     # ----------------------------------------------------
     # 2. Processa Carga Network-Bound
     # ----------------------------------------------------
     delete means
     delete stds
+    delete ic95s
     for (idx = 1; idx <= n_procs; idx++) {
         p = plist[idx]
         file = tmp "/heat_np_" p ".txt"
@@ -223,6 +350,7 @@ BEGIN {
             var = 0
             for (i = 1; i <= n; i++) var += (vals[i] - means[p])^2
             stds[p] = (n > 1) ? sqrt(var / (n - 1)) : 0
+            ic95s[p] = (n > 1) ? 1.96 * stds[p] / sqrt(n) : 0
         }
     }
     
@@ -236,6 +364,9 @@ BEGIN {
             speedup = t1_heat / means[p]
             eff = (speedup / p) * 100
             printf "%-5d | %6.3f ± %5.3f s   | %8.2fx | %9.1f%%\n", p, means[p], stds[p], speedup, eff
+            # Grava no CSV Resumo
+            printf "%s,network_bound,%d,2000,%d,%.4f,%.4f,%.4f,%.2f,%.1f,,,,\n",
+                   tag, p, n, means[p], stds[p], ic95s[p], speedup, eff >> resumo_csv
         }
     }
     print ""
@@ -244,4 +375,7 @@ BEGIN {
 
 echo "=========================================================="
 echo " Bateria concluída com sucesso! Dados prontos para o TCC."
+echo " Arquivo CSV de Amostras gerado em: $CSV_FILE"
+echo " Arquivo CSV Resumo gerado em:      $RESUMO_CSV"
+echo " Arquivo de Log textual salvo em:   $LOG_FILE"
 echo "=========================================================="
