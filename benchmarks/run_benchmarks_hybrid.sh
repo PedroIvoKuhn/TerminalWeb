@@ -7,7 +7,7 @@
 # - Permite informar T1 do Local Puro para Speedup e Eficiência Híbrida Real
 # - Exportação de Logs (.log) e Planilhas (.csv) prontas para o Google Planilhas
 # - Cooldown anti-throttling térmico e recomposição de créditos de CPU na nuvem
-# - Decomposição Granular de Tempos (Rede, Computação e Straggler)
+# - Decomposição Granular de Tempos para CPU-Bound e Network-Bound (Rede, Comp, Straggler)
 # ==============================================================================
 
 # Suprime avisos do OpenSSH e configura MCA para rede de Pods Calico CNI e VPN WAN Tailscale
@@ -46,8 +46,8 @@ if [ -z "$BENCH_TAG" ]; then
         BENCH_TAG="$DEFAULT_TAG"
     fi
 fi
-# Sanitiza o nome para evitar caracteres inválidos em arquivo
-BENCH_TAG=$(echo "$BENCH_TAG" | tr -c '[:alnum:]_-' '_')
+# Sanitiza o nome para evitar caracteres inválidos em arquivo (sem underscore residual no final)
+BENCH_TAG=$(echo -n "$BENCH_TAG" | tr -c '[:alnum:]_-' '_' | sed 's/_$//')
 
 LOG_FILE="$RESULTS_DIR/${BENCH_TAG}_execucao.log"
 CSV_FILE="$RESULTS_DIR/${BENCH_TAG}_amostras.csv"
@@ -56,12 +56,14 @@ RESUMO_CSV="$RESULTS_DIR/${BENCH_TAG}_resumo.csv"
 # Redireciona stdout e stderr para tela e arquivo de log simultaneamente
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-# Pergunta ou recebe o tempo de referência T1 (np=1 do Local Puro) para cálculo de Speedup Híbrido
+# Pergunta ou recebe o tempo de referência T1 de CPU e de Rede (np=1 do Local Puro)
 if [ -z "$T1_REF" ] && [ -t 0 ]; then
     echo ""
     echo "Dica: Para calcular o Speedup real do cluster híbrido frente ao nó local puro,"
-    read -r -p "informe o Tempo Médio de np=1 obtido no Local Puro em segundos (ou Enter para calcular relativo a np=2): " T1_INPUT
+    read -r -p "informe o Tempo Médio de np=1 de CPU (Matmul) obtido no Local Puro em segundos (ou Enter para pular): " T1_INPUT
     T1_REF="$T1_INPUT"
+    read -r -p "informe o Tempo Médio de np=1 de Rede (Heat2d) obtido no Local Puro em segundos (ou Enter para pular): " T1_HEAT_INPUT
+    T1_HEAT_REF="$T1_HEAT_INPUT"
 fi
 
 echo "=========================================================="
@@ -69,9 +71,14 @@ echo "    BATERIA DE TESTES DE DESEMPENHO MPI (CLUSTER HÍBRIDO) "
 echo "=========================================================="
 echo "Identificador do Ensaio: $BENCH_TAG"
 if [ -n "$T1_REF" ]; then
-    echo "Tempo de Referência Local T1: ${T1_REF}s"
+    echo "Tempo de Referência Local T1 (CPU):  ${T1_REF}s"
 else
-    echo "Tempo de Referência Local T1: Não informado (Speedup relativo a np=2)"
+    echo "Tempo de Referência Local T1 (CPU):  Não informado (Speedup relativo a np=2)"
+fi
+if [ -n "$T1_HEAT_REF" ]; then
+    echo "Tempo de Referência Local T1 (Rede): ${T1_HEAT_REF}s"
+else
+    echo "Tempo de Referência Local T1 (Rede): Não informado (Speedup relativo a np=2)"
 fi
 echo "Log completo da execução: $LOG_FILE"
 echo "Amostras para Google Planilhas: $CSV_FILE"
@@ -85,7 +92,9 @@ echo "cenario,carga,iteracao,np,N,t_total,t_rede,t_bcast,t_scatter,t_gather,t_co
 # Parâmetros de execução (Sobrescrevíveis via variáveis de ambiente)
 MATMUL_N="${MATMUL_N:-4800}"        # Dimensão da matriz quadrada (N x N)
 MATMUL_REPS="${MATMUL_REPS:-30}"    # 30 repetições para rigor estatístico do TCC
-HEAT_REPS="${HEAT_REPS:-5}"         # Repetições para Network-Bound
+HEAT_ROWS="${HEAT_ROWS:-2000}"      # Linhas da grade 2D
+HEAT_STEPS="${HEAT_STEPS:-800}"     # Passos no tempo
+HEAT_REPS="${HEAT_REPS:-30}"        # 30 repetições para rigor estatístico do TCC
 COOLDOWN_SECS="${COOLDOWN_SECS:-5}" # Segundos de repouso anti-throttling térmico/créditos
 
 TMP_DIR=$(mktemp -d /tmp/mpi_benchmarks_hybrid_XXXXXX)
@@ -235,13 +244,13 @@ done
 echo "Transição de fase: preparando carga Network-Bound..."
 cooldown 8
 
-# 3. Testes Network-Bound (Difusão de Calor 2D 2000x2000, 800 iterações)
+# 3. Testes Network-Bound (Difusão de Calor 2D, 30 Repetições com Decomposição)
 echo "=========================================================="
-echo " [3/3] Executando Carga Network-Bound (mpi_heat2d 2000x2000, $HEAT_REPS repetições)"
+echo " [3/3] Executando Carga Network-Bound (mpi_heat2d ${HEAT_ROWS}x${HEAT_ROWS}, ${HEAT_STEPS} iter, REPS=$HEAT_REPS)"
 echo "=========================================================="
 
 for np in $PROCESS_LIST; do
-    echo "--- Testando Carga Network-Bound com np=$np ($HEAT_REPS repetições) ---"
+    echo "--- Testando Carga Network-Bound com np=$np ($HEAT_REPS repetições internas + warm-up) ---"
     
     # Determina o subconjunto exato de hosts para o np atual
     CURRENT_HOSTS_FLAG=""
@@ -255,26 +264,35 @@ for np in $PROCESS_LIST; do
         fi
     fi
 
-    for r in $(seq 1 $HEAT_REPS); do
-        OUT=$(mpirun --allow-run-as-root --oversubscribe \
+    # Executa com tuning de socket TCP (4MB buffers para WAN BDP)
+    # mpi_heat2d gerencia internamente o warm-up e as repetições
+    while IFS= read -r line; do
+        echo "$line"
+        if [[ "$line" == AMOSTRA_NETWORK_BOUND* ]]; then
+            SEC=$(echo "$line" | sed -n 's/.*t_total=\([0-9.]*\).*/\1/p')
+            if [ -n "$SEC" ]; then
+                echo "$SEC" >> "$TMP_DIR/heat_np_${np}.txt"
+            fi
+            # Grava no CSV unificado para Google Planilhas
+            # Formato: cenario,carga,iteracao,np,N,t_total,t_rede,t_bcast,t_scatter,t_gather,t_comp_max,t_comp_min,t_straggler_wait
+            it=$(echo "$line" | sed -n 's/.*iter=\([0-9]*\).*/\1/p')
+            t_tot=$(echo "$line" | sed -n 's/.*t_total=\([0-9.]*\).*/\1/p')
+            t_red=$(echo "$line" | sed -n 's/.*t_rede=\([0-9.]*\).*/\1/p')
+            t_cmax=$(echo "$line" | sed -n 's/.*t_comp_max=\([0-9.]*\).*/\1/p')
+            t_cmin=$(echo "$line" | sed -n 's/.*t_comp_min=\([0-9.]*\).*/\1/p')
+            t_strag=$(echo "$line" | sed -n 's/.*t_straggler_wait=\([0-9.]*\).*/\1/p')
+            echo "${BENCH_TAG},network_bound,${it},${np},${HEAT_ROWS},${t_tot},${t_red},0.0000,0.0000,0.0000,${t_cmax},${t_cmin},${t_strag}" >> "$CSV_FILE"
+        elif [[ "$line" == RESUMO_ESTATISTICO_NETWORK* ]]; then
+            echo "$line" >> "$TMP_DIR/heat_resumo_np_${np}.txt"
+        fi
+    done < <(mpirun --allow-run-as-root --oversubscribe \
              --mca plm_rsh_args "-o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
              --mca btl_tcp_if_include eth0 \
              --mca oob_tcp_if_include eth0 \
              --mca mpi_yield_when_idle 1 \
              --mca btl_tcp_sndbuf 4194304 \
              --mca btl_tcp_rcvbuf 4194304 \
-             $CURRENT_HOSTS_FLAG -np $np ./mpi_heat2d 2>/dev/null)
-        
-        echo "$OUT"
-        
-        # Extrai o tempo em segundos
-        SEC=$(echo "$OUT" | grep "RESULTADO_NETWORK_BOUND" | sed -n 's/.*tempo_segundos=\([0-9.]*\)/\1/p')
-        if [ -n "$SEC" ]; then
-            echo "$SEC" >> "$TMP_DIR/heat_np_${np}.txt"
-            # Grava no CSV unificado
-            echo "${BENCH_TAG},network_bound,${r},${np},2000,${SEC},,,,,," >> "$CSV_FILE"
-        fi
-    done
+             $CURRENT_HOSTS_FLAG -np $np ./mpi_heat2d $HEAT_ROWS $HEAT_ROWS $HEAT_STEPS $HEAT_REPS 2>/dev/null)
     
     # Cooldown entre configurações de processo
     cooldown "$COOLDOWN_SECS"
@@ -285,10 +303,11 @@ echo "=========================================================="
 echo "          RESUMO ESTATÍSTICO CONSOLIDADO DO TCC           "
 echo "=========================================================="
 
-awk -v procs="$PROCESS_LIST" -v tmp="$TMP_DIR" -v matmul_n="$MATMUL_N" -v matmul_reps="$MATMUL_REPS" -v tag="$BENCH_TAG" -v resumo_csv="$RESUMO_CSV" -v t1_ref_in="$T1_REF" '
+awk -v procs="$PROCESS_LIST" -v tmp="$TMP_DIR" -v matmul_n="$MATMUL_N" -v matmul_reps="$MATMUL_REPS" -v heat_rows="$HEAT_ROWS" -v heat_steps="$HEAT_STEPS" -v heat_reps="$HEAT_REPS" -v tag="$BENCH_TAG" -v resumo_csv="$RESUMO_CSV" -v t1_ref_in="$T1_REF" -v t1_heat_ref_in="$T1_HEAT_REF" '
 BEGIN {
     n_procs = split(procs, plist, " ")
     t1_ref_val = (t1_ref_in + 0.0)
+    t1_heat_ref_val = (t1_heat_ref_in + 0.0)
 
     # Cabeçalho do CSV Resumo
     print "cenario,carga,np,dimensao_N,repeticoes,tempo_medio_s,desvio_padrao_s,ic95_s,speedup,eficiencia_pct,media_rede_s,media_comp_max_s,media_straggler_s" > resumo_csv
@@ -338,9 +357,7 @@ BEGIN {
         }
     }
 
-    # ----------------------------------------------------
-    # 1.1 Decomposição de Tempos CPU-Bound (Rede, Comp, Straggler)
-    # ----------------------------------------------------
+    # 1.1 Decomposição Média de Tempos CPU-Bound (Rede, Comp, Straggler)
     printf "\n--- Decomposição Média de Tempos CPU-Bound Híbrido (N=%d) ---\n", matmul_n
     printf "%-5s | %-12s | %-12s | %-12s | %-12s\n", "np", "T_Total (s)", "T_Rede (s)", "T_CompMax(s)", "Straggler(s)"
     print "------------------------------------------------------------------------"
@@ -396,9 +413,16 @@ BEGIN {
         }
     }
     
-    t1_heat = (plist[1] in means) ? means[plist[1]] : 0
-    print "\n=== 2. Carga Network-Bound Híbrida: Difusão de Calor 2D (2000x2000, 800 iter) ==="
-    printf "Base de Comparação de Speedup: Relativo a np=%d (%.3fs)\n", plist[1], t1_heat
+    if (t1_heat_ref_val > 0) {
+        t1_heat = t1_heat_ref_val
+        heat_ref_label = sprintf("T1_Local_Ref = %.3fs", t1_heat)
+    } else {
+        t1_heat = (plist[1] in means) ? means[plist[1]] : 0
+        heat_ref_label = sprintf("Relativo a np=%d (%.3fs)", plist[1], t1_heat)
+    }
+
+    printf "\n=== 2. Carga Network-Bound Híbrida: Difusão de Calor 2D (%dx%d, %d iter, REPS=%d) ===\n", heat_rows, heat_rows, heat_steps, heat_reps
+    printf "Base de Comparação de Speedup: %s\n", heat_ref_label
     printf "%-5s | %-18s | %-10s | %-10s\n", "np", "Tempo Médio (s)", "Speedup", "Eficiência"
     print "------------------------------------------------------------"
     for (idx = 1; idx <= n_procs; idx++) {
@@ -407,9 +431,38 @@ BEGIN {
             speedup = t1_heat / means[p]
             eff = (speedup / p) * 100
             printf "%-5d | %6.3f ± %5.3f s   | %8.2fx | %9.1f%%\n", p, means[p], stds[p], speedup, eff
-            # Grava no CSV Resumo
-            printf "%s,network_bound,%d,2000,%d,%.4f,%.4f,%.4f,%.2f,%.1f,,,,\n",
-                   tag, p, n, means[p], stds[p], ic95s[p], speedup, eff >> resumo_csv
+        }
+    }
+
+    # 2.1 Decomposição Média de Tempos Network-Bound (Rede, Comp, Straggler)
+    printf "\n--- Decomposição Média de Tempos Network-Bound Híbrido (%dx%d) ---\n", heat_rows, heat_rows
+    printf "%-5s | %-12s | %-12s | %-12s | %-12s\n", "np", "T_Total (s)", "T_Rede (s)", "T_CompMax(s)", "Straggler(s)"
+    print "------------------------------------------------------------------------"
+    for (idx = 1; idx <= n_procs; idx++) {
+        p = plist[idx]
+        res_file = tmp "/heat_resumo_np_" p ".txt"
+        m_rede = 0; m_comp = 0; m_strag = 0
+        if ((getline line < res_file) > 0) {
+            split(line, fields, ",")
+            delete kv
+            for (f in fields) {
+                split(fields[f], pair, "=")
+                if (length(pair) == 2) kv[pair[1]] = pair[2]
+            }
+            m_rede = kv["media_rede"]
+            m_comp = kv["media_comp_max"]
+            m_strag = kv["media_straggler"]
+            printf "%-5d | %10.4f s | %10.4f s | %10.4f s | %10.4f s\n",
+                   p, kv["media_total"], m_rede, m_comp, m_strag
+        }
+        close(res_file)
+
+        # Grava no CSV Resumo
+        if (p in means && means[p] > 0) {
+            speedup = t1_heat / means[p]
+            eff = (speedup / p) * 100
+            printf "%s,network_bound,%d,%d,%d,%.4f,%.4f,%.4f,%.2f,%.1f,%.4f,%.4f,%.4f\n",
+                   tag, p, heat_rows, heat_reps, means[p], stds[p], ic95s[p], speedup, eff, m_rede, m_comp, m_strag >> resumo_csv
         }
     }
     print ""

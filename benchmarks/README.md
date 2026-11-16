@@ -30,11 +30,20 @@
   - Resumo estatístico final:
     `RESUMO_ESTATISTICO,np=%d,N=%d,reps=%d,media_total=%.4f,sd_total=%.4f,ic95_total=%.4f,media_rede=%.4f,sd_rede=%.4f,media_comp_max=%.4f,sd_comp_max=%.4f,media_straggler=%.4f`
 
-### 1.2 `mpi_heat2d.c` (Carga Network-Bound / Stencil)
+### 1.2 `mpi_heat2d.c` (Carga Network-Bound / Stencil com Decomposição de Tempos)
 * **Objetivo:** Investigar a fronteira técnica do *cloud bursting* em tarefas iterativas com sincronização contínua e sensível à latência da rede de longa distância (WAN).
-* **Parâmetros:** Grade $2000 \times 2000$ pontos, $800$ iterações temporais.
-* **Mecânica:** A cada passo no tempo, ocorre uma troca de linhas de contorno (*Halo Exchange*) via `MPI_Sendrecv` entre processos vizinhos.
-* **Expectativa:** Demonstrar o impacto cumulativo do RTT da VPN Tailscale ($22,3$~ms na AWS e $77,5$~ms na Azure), evidenciando a Lei de Amdahl em sistemas geograficamente distribuídos.
+* **Parâmetros Padrão:** Grade $2000 \times 2000$ pontos, $800$ iterações temporais por repetição e $30$ repetições cronometradas com rigor estatístico.
+* **Mecânica e Decomposição Granular:**
+  - A cada passo temporal, ocorre uma troca de linhas de contorno (*Halo Exchange*) via `MPI_Sendrecv` entre processos vizinhos.
+  - O benchmark isola o tempo acumulado de transporte na rede ($t_{\text{rede}}$ correspondente aos 800 passos de `MPI_Sendrecv`), o tempo de cálculo da CPU no estêncil de 5 pontos ($t_{\text{comp\_max}}$ e $t_{\text{comp\_min}}$), o tempo de espera na barreira pós-estêncil ($t_{\text{straggler\_wait}}$) e o tempo total da repetição ($t_{\text{total}}$).
+* **Warm-up Inteligente e Pausa Térmica:**
+  - 1 iteração rápida de warm-up (10 passos no tempo) para abrir conexões TCP e handshake WireGuard sem atrasar o ensaio;
+  - Pausa inter-amostra de $2$ segundos (`sleep(2)`) sincronizada com `MPI_Barrier` entre as 30 repetições.
+* **Logs Emitidos pelo Rank 0:**
+  - Amostra individual:
+    `AMOSTRA_NETWORK_BOUND,iter=%d,np=%d,linhas=%d,colunas=%d,iteracoes=%d,t_total=%.4f,t_rede=%.4f,t_comp_max=%.4f,t_comp_min=%.4f,t_straggler_wait=%.4f`
+  - Resumo estatístico final:
+    `RESUMO_ESTATISTICO_NETWORK,np=%d,linhas=%d,colunas=%d,iteracoes=%d,reps=%d,media_total=%.4f,sd_total=%.4f,ic95_total=%.4f,media_rede=%.4f,sd_rede=%.4f,media_comp_max=%.4f,sd_comp_max=%.4f,media_straggler=%.4f`
 
 ### 1.3 `keystroke_benchmark_browser.js` (Qualidade de Experiência - QoE)
 * **Objetivo:** Medir a latência percebida pelo aluno ao digitar no terminal interativo (Xterm.js via WebSockets).
@@ -170,7 +179,16 @@ chmod +x run_benchmarks_hybrid.sh
 ```
 *(O script solicitará o tempo $T_1$ obtido no ensaio Local Puro. Ao fornecê-lo, ele calcula o **Speedup Híbrido Real** $S_p = T_1^{\text{local}} / T_p^{\text{híbrido}}$ e a Eficiência).*
 
-#### C) Importar os Resultados no Google Planilhas:
+#### C) Para Executar Exclusivamente a Difusão de Calor (`run_heat_only.sh`):
+Caso já tenha rodado a multiplicação de matrizes e queira executar (ou refazer) apenas o benchmark Network-Bound sem esperar o teste de CPU novamente:
+```bash
+chmod +x run_heat_only.sh
+
+# Executa as 30 repetições de mpi_heat2d para np = 1, 2, 4 com decomposição de tempos e CSV:
+./run_heat_only.sh "master,worker-1,worker-2,worker-3"
+```
+
+#### D) Importar os Resultados no Google Planilhas:
 1. Ao final dos testes, acesse o editor do TerminalWeb ou baixe o arquivo de resultados do pod:
    `microk8s kubectl cp terminal-web/<POD_MASTER>:/home/aluno/resultados/ .`
 2. No **Google Planilhas**, vá em **Arquivo > Importar > Fazer Upload** e selecione o arquivo `<TAG>_amostras.csv`.

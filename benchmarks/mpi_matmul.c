@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <unistd.h>
 #include <mpi.h>
 
 #define DEFAULT_N 4800
@@ -149,8 +150,10 @@ int main(int argc, char **argv) {
     }
 
     // =========================================================================
-    // 3. Warm-up (1 Iteração Completa Não Cronometrada)
-    // Aquece janelas de congestionamento TCP (Tailscale WireGuard) e caches L1-L3/TLB
+    // 3. Warm-up Inteligente (Aquecimento de Rede e Resolução IFUNC)
+    // Transmite os buffers reais para aquecer a janela TCP (WireGuard) e BTL,
+    // mas calcula apenas um lote representativo de linhas (<= 16) para aquecer
+    // o pipeline vetorial sem desperdiçar dezenas de segundos na CPU.
     // =========================================================================
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Bcast(B, (int)total_elements, MPI_DOUBLE, 0, MPI_COMM_WORLD);
@@ -166,7 +169,8 @@ int main(int argc, char **argv) {
     }
 
     memset(local_C, 0, sub_elements * sizeof(double));
-    for (int i = 0; i < rows_per_proc; i++) {
+    int warmup_rows = (rows_per_proc < 16) ? rows_per_proc : 16;
+    for (int i = 0; i < warmup_rows; i++) {
         for (int k = 0; k < N; k++) {
             double r = local_A[i * N + k];
             for (int j = 0; j < N; j++) {
@@ -187,6 +191,7 @@ int main(int argc, char **argv) {
                    0, MPI_COMM_WORLD);
     }
     MPI_Barrier(MPI_COMM_WORLD);
+    sleep(1);
 
     // =========================================================================
     // 4. Laço Interno Cronometrado de Repetições (iter = 1 até REPS)
@@ -287,6 +292,13 @@ int main(int argc, char **argv) {
                    iter, num_procs, N, t_total, t_rede, t_bcast, t_scatter, t_gather,
                    t_comp_max, t_comp_min, t_straggler_wait);
             fflush(stdout);
+        }
+
+        // Pausa inter-amostra de 2s para alívio térmico da CPU e recomposição de rajada
+        // (2s preserva túnel WireGuard e buffers TCP BTL 100% aquecidos, cujo timeout é de 25s+)
+        if (iter < reps) {
+            MPI_Barrier(MPI_COMM_WORLD);
+            sleep(2);
         }
     }
 

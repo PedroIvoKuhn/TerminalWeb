@@ -377,44 +377,37 @@ async function createClusterResources(clusterInfo) {
             }
         } else {
             // Pods locais (seja no cluster puramente local ou no cluster híbrido):
-            // Agora que todas as máquinas possuem Tailscale e Calico integrados, podem rodar em qualquer
-            // nó físico local do cluster. Se LOCAL_CLUSTER_NODES estiver definido no .env
-            // (ex: 'ubuntu10,ubuntu11' para benchmark homogêneo em i7), restringe a esses nós.
-            const envLocalNodes = process.env.LOCAL_CLUSTER_NODES;
-            const eligibleLocalNodes = envLocalNodes 
-                ? envLocalNodes.split(',').map(s => s.trim()).filter(Boolean)
-                : [
-                    'ubuntu10', 'ubuntu11', 
-                    'ubuntu00', 'ubuntu03', 'ubuntu05', 
-                    'ubuntu06', 'ubuntu07', 'ubuntu08', 'ubuntu09'
-                  ];
-
-            podManifest.spec.affinity.nodeAffinity = {
-                requiredDuringSchedulingIgnoredDuringExecution: {
-                    nodeSelectorTerms: [{
-                        matchExpressions: [{
-                            key: 'kubernetes.io/hostname',
-                            operator: 'In',
-                            values: eligibleLocalNodes
-                        }]
-                    }]
-                }
-            };
-
-            // Para o nó master (i === 0), adiciona preferência suave por 'ubuntu10' (onde roda o backend e CoreDNS)
+            // O pod master (i === 0) DEVE rodar obrigatoriamente no nó de controle 'ubuntu10'
+            // (onde residem o backend, apiserver, Tailscale VPN e CoreDNS). Isso assegura que
+            // o WebSocket exec (restore de backup no MinIO, terminal interativo e auto-save) nunca falhe
+            // com erro 500 por incompatibilidade de certificados TLS do Kubelet em nós secundários.
             if (i === 0) {
-                podManifest.spec.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution = [
-                    {
-                        weight: 50,
-                        preference: {
-                            matchExpressions: [{
-                                key: 'kubernetes.io/hostname',
-                                operator: 'In',
-                                values: ['ubuntu10']
-                            }]
-                        }
-                    }
-                ];
+                podManifest.spec.nodeSelector = {
+                    'kubernetes.io/hostname': 'ubuntu10'
+                };
+            } else {
+                // Workers locais (i > 0): NUNCA devem rodar no mesmo nó que o master ('ubuntu10').
+                // Cada worker local é distribuído em nós físicos distintos do laboratório (ubuntu11, ubuntu05, ubuntu08, etc.),
+                // garantindo isolamento total de hardware (CPU/memória/cache L3).
+                const envLocalNodes = process.env.LOCAL_CLUSTER_NODES;
+                const baseEligibleNodes = envLocalNodes 
+                    ? envLocalNodes.split(',').map(s => s.trim()).filter(Boolean)
+                    : [
+                        'ubuntu11', 'ubuntu05', 'ubuntu08', 
+                        'ubuntu00', 'ubuntu07', 'ubuntu09'
+                      ];
+
+                // Remove estritamente 'ubuntu10' da lista de nós de workers
+                const workerEligibleNodes = baseEligibleNodes.filter(node => node !== 'ubuntu10');
+                const targetNodes = workerEligibleNodes.length > 0 ? workerEligibleNodes : ['ubuntu11'];
+
+                // Distribui os workers locais em round-robin entre as máquinas físicas disponíveis (worker-1 -> ubuntu11, worker-2 -> ubuntu05, etc.)
+                const localWorkerIdx = i - 1;
+                const assignedLocalNode = targetNodes[localWorkerIdx % targetNodes.length];
+
+                podManifest.spec.nodeSelector = {
+                    'kubernetes.io/hostname': assignedLocalNode
+                };
             }
         }
 
