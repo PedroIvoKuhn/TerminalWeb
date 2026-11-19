@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Script de Execução Automatizada dos Benchmarks MPI (TCC - Pedro Ivo Kuhn)
+# Tríade Metodológica Completa:
+# 1. Zero-Network / Pura CPU: Simulação de Monte Carlo (Estimativa de Pi)
+# 2. Bulk-Synchronous / CPU + Dados: Multiplicação de Matrizes (Matmul)
+# 3. Fine-Grained / Latency-Bound: Difusão de Calor 2D (Heat2D Stencil)
 # Inclui:
 # - Exportação de Logs (.log) e Planilha (.csv) pronta para Google Planilhas
 # - Cooldown anti-throttling térmico e recomposição de créditos de CPU na nuvem
-# - Decomposição Granular de Tempos para CPU-Bound e Network-Bound (Rede, Comp, Straggler)
+# - Decomposição Granular de Tempos (Rede, Computação Local e Straggler Wait)
 # - Cálculo automático de Média, Desvio Padrão, IC 95%, Speedup e Eficiência
 # ==============================================================================
 
@@ -68,6 +72,8 @@ echo ""
 echo "cenario,carga,iteracao,np,N,t_total,t_rede,t_bcast,t_scatter,t_gather,t_comp_max,t_comp_min,t_straggler_wait" > "$CSV_FILE"
 
 # Parâmetros de execução (Sobrescrevíveis via variáveis de ambiente)
+MC_SAMPLES="${MC_SAMPLES:-2500000000}" # 2.5 bilhões de amostras Monte Carlo (Zero-Network)
+MC_REPS="${MC_REPS:-30}"             # 30 repetições para rigor estatístico do TCC
 MATMUL_N="${MATMUL_N:-4800}"        # Dimensão da matriz quadrada (N x N)
 MATMUL_REPS="${MATMUL_REPS:-30}"    # 30 repetições para rigor estatístico do TCC
 HEAT_ROWS="${HEAT_ROWS:-2000}"      # Linhas da grade 2D
@@ -90,7 +96,7 @@ cooldown() {
 # 1. Compilação Multi-Arquitetura Otimizada
 # -O3 -mavx2 -mfma -funroll-loops para Intel Xeon Sapphire Rapids / AMD EPYC
 # com detecção segura para evitar SIGILL em nós Core i7 Sandy Bridge (i7-2600 local)
-echo "[1/3] Compilando algoritmos..."
+echo "[1/4] Compilando algoritmos..."
 if grep -q "avx2" /proc/cpuinfo 2>/dev/null && grep -q "fma" /proc/cpuinfo 2>/dev/null; then
     MATMUL_ARCH_FLAGS="-mavx2 -mfma"
 elif grep -q "avx" /proc/cpuinfo 2>/dev/null; then
@@ -99,9 +105,10 @@ else
     MATMUL_ARCH_FLAGS=""
 fi
 
+mpicc -O3 -Wall mpi_montecarlo.c -o mpi_montecarlo -lm
 mpicc -O3 $MATMUL_ARCH_FLAGS -funroll-loops -Wall mpi_matmul.c -o mpi_matmul -lm
 mpicc -O3 -Wall mpi_heat2d.c -o mpi_heat2d -lm
-echo "-> Binários gerados com sucesso (Flags Matmul: -O3 $MATMUL_ARCH_FLAGS -funroll-loops + IFUNC multi-arch)."
+echo "-> Binários gerados com sucesso (Monte Carlo, Matmul IFUNC multi-arch e Heat2D)."
 echo ""
 
 # Verifica se foi passado um hostfile/hosts ou detecta automaticamente via ~/.ssh/config
@@ -128,7 +135,7 @@ if [ -n "$TARGET_HOSTS" ]; then
             echo "-> Enviando para $clean_host..."
             ssh -q -o LogLevel=ERROR -o StrictHostKeyChecking=no "$clean_host" "mkdir -p /home/aluno/.openmpi" 2>/dev/null || true
             scp -q -o LogLevel=ERROR -o StrictHostKeyChecking=no "$HOME/.openmpi/mca-params.conf" "$clean_host:/home/aluno/.openmpi/mca-params.conf" 2>/dev/null || true
-            scp -q -o LogLevel=ERROR -o StrictHostKeyChecking=no mpi_matmul mpi_heat2d "$clean_host:/home/aluno/" || echo "Aviso: Falha ao copiar para $clean_host."
+            scp -q -o LogLevel=ERROR -o StrictHostKeyChecking=no mpi_montecarlo mpi_matmul mpi_heat2d "$clean_host:/home/aluno/" || echo "Aviso: Falha ao copiar para $clean_host."
         fi
     done
     echo "-> Sincronização concluída com sucesso."
@@ -146,9 +153,68 @@ fi
 echo "Processos a avaliar (np): $PROCESS_LIST"
 echo ""
 
-# 2. Testes CPU-Bound (Multiplicação de Matrizes N=4800, 30 Repetições com Decomposição)
+# 2. Testes Zero-Network / CPU Pura (Simulação de Monte Carlo N=2.500.000.000, 30 Repetições com Decomposição)
 echo "=========================================================="
-echo " [2/3] Executando Carga CPU-Bound (mpi_matmul N=$MATMUL_N, REPS=$MATMUL_REPS)"
+echo " [2/4] Executando Carga Zero-Network (mpi_montecarlo N=$MC_SAMPLES, REPS=$MC_REPS)"
+echo "=========================================================="
+
+for np in $PROCESS_LIST; do
+    echo "--- Testando Carga Zero-Network com np=$np ($MC_REPS repetições internas + warm-up) ---"
+    
+    # Determina o subconjunto exato de hosts para o np atual
+    CURRENT_HOSTS_FLAG=""
+    if [ -n "$TARGET_HOSTS" ]; then
+        IFS=',' read -ra ALL_HOSTS <<< "$TARGET_HOSTS"
+        TOTAL_AVAILABLE=${#ALL_HOSTS[@]}
+        if [ "$np" -le "$TOTAL_AVAILABLE" ]; then
+            SELECTED=("${ALL_HOSTS[@]:0:$np}")
+            CURRENT_HOSTS=$(IFS=','; echo "${SELECTED[*]}")
+        else
+            CURRENT_HOSTS="$TARGET_HOSTS"
+        fi
+        CURRENT_HOSTS_FLAG="-H $CURRENT_HOSTS"
+        echo "Hosts ativos para np=$np: $CURRENT_HOSTS"
+    fi
+
+    # Executa mpi_montecarlo
+    while IFS= read -r line; do
+        echo "$line"
+        if [[ "$line" == AMOSTRA_MONTECARLO* ]]; then
+            SEC=$(echo "$line" | sed -n 's/.*t_total=\([0-9.]*\).*/\1/p')
+            if [ -n "$SEC" ]; then
+                echo "$SEC" >> "$TMP_DIR/mc_np_${np}.txt"
+            fi
+            # Grava no CSV unificado para Google Planilhas
+            it=$(echo "$line" | sed -n 's/.*iter=\([0-9]*\).*/\1/p')
+            t_tot=$(echo "$line" | sed -n 's/.*t_total=\([0-9.]*\).*/\1/p')
+            t_red=$(echo "$line" | sed -n 's/.*t_rede=\([0-9.]*\).*/\1/p')
+            t_cmax=$(echo "$line" | sed -n 's/.*t_comp_max=\([0-9.]*\).*/\1/p')
+            t_cmin=$(echo "$line" | sed -n 's/.*t_comp_min=\([0-9.]*\).*/\1/p')
+            t_strag=$(echo "$line" | sed -n 's/.*t_straggler_wait=\([0-9.]*\).*/\1/p')
+            echo "${BENCH_TAG},monte_carlo,${it},${np},${MC_SAMPLES},${t_tot},${t_red},0.0000,0.0000,0.0000,${t_cmax},${t_cmin},${t_strag}" >> "$CSV_FILE"
+        elif [[ "$line" == RESUMO_ESTATISTICO_MONTECARLO* ]]; then
+            echo "$line" >> "$TMP_DIR/mc_resumo_np_${np}.txt"
+        fi
+    done < <(mpirun --allow-run-as-root --oversubscribe \
+             --mca plm_rsh_args "-o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
+             --mca btl_tcp_if_include eth0 \
+             --mca oob_tcp_if_include eth0 \
+             --mca mpi_yield_when_idle 1 \
+             --mca btl_tcp_sndbuf 4194304 \
+             --mca btl_tcp_rcvbuf 4194304 \
+             $CURRENT_HOSTS_FLAG -np $np ./mpi_montecarlo $MC_SAMPLES $MC_REPS 2>/dev/null)
+    
+    # Cooldown entre configurações de processo para resfriamento
+    cooldown "$COOLDOWN_SECS"
+done
+
+# Cooldown intermediário entre as baterias Zero-Network e CPU-Bound
+echo "Transição de fase: preparando carga CPU-Bound (Matmul)..."
+cooldown 8
+
+# 3. Testes CPU-Bound (Multiplicação de Matrizes N=4800, 30 Repetições com Decomposição)
+echo "=========================================================="
+echo " [3/4] Executando Carga CPU-Bound (mpi_matmul N=$MATMUL_N, REPS=$MATMUL_REPS)"
 echo "=========================================================="
 
 for np in $PROCESS_LIST; do
@@ -198,12 +264,12 @@ for np in $PROCESS_LIST; do
 done
 
 # Cooldown intermediário entre as baterias CPU-Bound e Network-Bound
-echo "Transição de fase: preparando carga Network-Bound..."
+echo "Transição de fase: preparando carga Network-Bound (Heat2D)..."
 cooldown 8
 
-# 3. Testes Network-Bound (Difusão de Calor 2D, 30 Repetições com Decomposição)
+# 4. Testes Network-Bound (Difusão de Calor 2D, 30 Repetições com Decomposição)
 echo "=========================================================="
-echo " [3/3] Executando Carga Network-Bound (mpi_heat2d ${HEAT_ROWS}x${HEAT_ROWS}, ${HEAT_STEPS} iter, REPS=$HEAT_REPS)"
+echo " [4/4] Executando Carga Network-Bound (mpi_heat2d ${HEAT_ROWS}x${HEAT_ROWS}, ${HEAT_STEPS} iter, REPS=$HEAT_REPS)"
 echo "=========================================================="
 
 for np in $PROCESS_LIST; do
@@ -258,12 +324,12 @@ for np in $PROCESS_LIST; do
     cooldown "$COOLDOWN_SECS"
 done
 
-# 4. Cálculo Estatístico (Média, Desvio Padrão, Speedup e Eficiência)
+# 5. Cálculo Estatístico (Média, Desvio Padrão, Speedup e Eficiência)
 echo "=========================================================="
 echo "          RESUMO ESTATÍSTICO CONSOLIDADO DO TCC           "
 echo "=========================================================="
 
-awk -v procs="$PROCESS_LIST" -v tmp="$TMP_DIR" -v matmul_n="$MATMUL_N" -v matmul_reps="$MATMUL_REPS" -v heat_rows="$HEAT_ROWS" -v heat_steps="$HEAT_STEPS" -v heat_reps="$HEAT_REPS" -v tag="$BENCH_TAG" -v resumo_csv="$RESUMO_CSV" '
+awk -v procs="$PROCESS_LIST" -v tmp="$TMP_DIR" -v mc_samples="$MC_SAMPLES" -v mc_reps="$MC_REPS" -v matmul_n="$MATMUL_N" -v matmul_reps="$MATMUL_REPS" -v heat_rows="$HEAT_ROWS" -v heat_steps="$HEAT_STEPS" -v heat_reps="$HEAT_REPS" -v tag="$BENCH_TAG" -v resumo_csv="$RESUMO_CSV" '
 BEGIN {
     n_procs = split(procs, plist, " ")
     
@@ -271,7 +337,76 @@ BEGIN {
     print "cenario,carga,np,dimensao_N,repeticoes,tempo_medio_s,desvio_padrao_s,ic95_s,speedup,eficiencia_pct,media_rede_s,media_comp_max_s,media_straggler_s" > resumo_csv
 
     # ----------------------------------------------------
-    # 1. Processa Carga CPU-Bound
+    # 1. Processa Carga Zero-Network (Monte Carlo)
+    # ----------------------------------------------------
+    delete means
+    delete stds
+    delete ic95s
+    for (idx = 1; idx <= n_procs; idx++) {
+        p = plist[idx]
+        file = tmp "/mc_np_" p ".txt"
+        n = 0; sum = 0
+        delete vals
+        while ((getline val < file) > 0) {
+            if (val > 0) { n++; vals[n] = val; sum += val }
+        }
+        close(file)
+        if (n > 0) {
+            means[p] = sum / n
+            var = 0
+            for (i = 1; i <= n; i++) var += (vals[i] - means[p])^2
+            stds[p] = (n > 1) ? sqrt(var / (n - 1)) : 0
+            ic95s[p] = (n > 1) ? 1.96 * stds[p] / sqrt(n) : 0
+        }
+    }
+    
+    t1_mc = (1 in means) ? means[1] : means[plist[1]]
+    printf "\n=== 1. Carga Zero-Network: Simulação de Monte Carlo (N=%d, REPS=%d) ===\n", mc_samples, mc_reps
+    printf "%-5s | %-18s | %-10s | %-10s\n", "np", "Tempo Médio (s)", "Speedup", "Eficiência"
+    print "------------------------------------------------------------"
+    for (idx = 1; idx <= n_procs; idx++) {
+        p = plist[idx]
+        if (p in means) {
+            speedup = t1_mc / means[p]
+            eff = (speedup / p) * 100
+            printf "%-5d | %6.3f ± %5.3f s   | %8.2fx | %9.1f%%\n", p, means[p], stds[p], speedup, eff
+        }
+    }
+
+    # 1.1 Decomposição Média de Tempos Monte Carlo (Rede, Comp, Straggler)
+    printf "\n--- Decomposição Média de Tempos Zero-Network (N=%d) ---\n", mc_samples
+    printf "%-5s | %-12s | %-12s | %-12s | %-12s\n", "np", "T_Total (s)", "T_Rede (s)", "T_CompMax(s)", "Straggler(s)"
+    print "------------------------------------------------------------------------"
+    for (idx = 1; idx <= n_procs; idx++) {
+        p = plist[idx]
+        res_file = tmp "/mc_resumo_np_" p ".txt"
+        m_rede = 0; m_comp = 0; m_strag = 0
+        if ((getline line < res_file) > 0) {
+            split(line, fields, ",")
+            delete kv
+            for (f in fields) {
+                split(fields[f], pair, "=")
+                if (length(pair) == 2) kv[pair[1]] = pair[2]
+            }
+            m_rede = kv["media_rede"]
+            m_comp = kv["media_comp_max"]
+            m_strag = kv["media_straggler"]
+            printf "%-5d | %10.4f s | %10.4f s | %10.4f s | %10.4f s\n",
+                   p, kv["media_total"], m_rede, m_comp, m_strag
+        }
+        close(res_file)
+
+        # Grava no CSV Resumo
+        if (p in means) {
+            speedup = t1_mc / means[p]
+            eff = (speedup / p) * 100
+            printf "%s,monte_carlo,%d,%d,%d,%.4f,%.4f,%.4f,%.2f,%.1f,%.4f,%.4f,%.4f\n",
+                   tag, p, mc_samples, mc_reps, means[p], stds[p], ic95s[p], speedup, eff, m_rede, m_comp, m_strag >> resumo_csv
+        }
+    }
+
+    # ----------------------------------------------------
+    # 2. Processa Carga CPU-Bound (Matmul)
     # ----------------------------------------------------
     delete means
     delete stds
@@ -295,7 +430,7 @@ BEGIN {
     }
     
     t1_matmul = (1 in means) ? means[1] : means[plist[1]]
-    printf "\n=== 1. Carga CPU-Bound: Multiplicação de Matrizes (N=%d, REPS=%d) ===\n", matmul_n, matmul_reps
+    printf "\n=== 2. Carga CPU-Bound: Multiplicação de Matrizes (N=%d, REPS=%d) ===\n", matmul_n, matmul_reps
     printf "%-5s | %-18s | %-10s | %-10s\n", "np", "Tempo Médio (s)", "Speedup", "Eficiência"
     print "------------------------------------------------------------"
     for (idx = 1; idx <= n_procs; idx++) {
@@ -307,7 +442,7 @@ BEGIN {
         }
     }
 
-    # 1.1 Decomposição Média de Tempos CPU-Bound (Rede, Comp, Straggler)
+    # 2.1 Decomposição Média de Tempos CPU-Bound (Rede, Comp, Straggler)
     printf "\n--- Decomposição Média de Tempos CPU-Bound (N=%d) ---\n", matmul_n
     printf "%-5s | %-12s | %-12s | %-12s | %-12s\n", "np", "T_Total (s)", "T_Rede (s)", "T_CompMax(s)", "Straggler(s)"
     print "------------------------------------------------------------------------"
@@ -340,7 +475,7 @@ BEGIN {
     }
     
     # ----------------------------------------------------
-    # 2. Processa Carga Network-Bound
+    # 3. Processa Carga Network-Bound (Heat2D)
     # ----------------------------------------------------
     delete means
     delete stds
@@ -364,7 +499,7 @@ BEGIN {
     }
     
     t1_heat = (1 in means) ? means[1] : means[plist[1]]
-    printf "\n=== 2. Carga Network-Bound: Difusão de Calor 2D (%dx%d, %d iter, REPS=%d) ===\n", heat_rows, heat_rows, heat_steps, heat_reps
+    printf "\n=== 3. Carga Network-Bound: Difusão de Calor 2D (%dx%d, %d iter, REPS=%d) ===\n", heat_rows, heat_rows, heat_steps, heat_reps
     printf "%-5s | %-18s | %-10s | %-10s\n", "np", "Tempo Médio (s)", "Speedup", "Eficiência"
     print "------------------------------------------------------------"
     for (idx = 1; idx <= n_procs; idx++) {
@@ -376,7 +511,7 @@ BEGIN {
         }
     }
 
-    # 2.1 Decomposição Média de Tempos Network-Bound (Rede, Comp, Straggler)
+    # 3.1 Decomposição Média de Tempos Network-Bound (Rede, Comp, Straggler)
     printf "\n--- Decomposição Média de Tempos Network-Bound (%dx%d) ---\n", heat_rows, heat_rows
     printf "%-5s | %-12s | %-12s | %-12s | %-12s\n", "np", "T_Total (s)", "T_Rede (s)", "T_CompMax(s)", "Straggler(s)"
     print "------------------------------------------------------------------------"

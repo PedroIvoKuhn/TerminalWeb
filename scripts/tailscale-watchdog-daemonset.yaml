@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: tailscale-watchdog
+  namespace: kube-system
+  labels:
+    app: tailscale-watchdog
+spec:
+  selector:
+    matchLabels:
+      app: tailscale-watchdog
+  template:
+    metadata:
+      labels:
+        app: tailscale-watchdog
+    spec:
+      hostPID: true
+      hostNetwork: true
+      nodeSelector:
+        kubernetes.io/os: linux
+        microk8s.io/cluster: "true"
+      tolerations:
+      - operator: Exists
+      containers:
+      - name: watchdog
+        image: busybox
+        securityContext:
+          privileged: true
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "[watchdog] Tailscale Watchdog iniciado no host."
+          FAIL_COUNT=0
+          while true; do
+            STATUS=$(chroot /host tailscale status --json 2>&1 || true)
+            if echo "$STATUS" | grep -q "Unable to connect to the Tailscale coordination server"; then
+              FAIL_COUNT=$((FAIL_COUNT + 1))
+              echo "[$(date)] Falha de conexao com o coordination server detectada ($FAIL_COUNT/3)."
+              if [ "$FAIL_COUNT" -ge 3 ]; then
+                echo "[$(date)] Limite de 3 falhas consecutivas atingido. Reiniciando tailscaled no host..."
+                chroot /host systemctl restart tailscaled || true
+                FAIL_COUNT=0
+                sleep 20
+              fi
+            else
+              FAIL_COUNT=0
+            fi
+            sleep 15
+          done
+        volumeMounts:
+        - name: host-root
+          mountPath: /host
+      volumes:
+      - name: host-root
+        hostPath:
+          path: /

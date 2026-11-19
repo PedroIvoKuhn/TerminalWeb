@@ -6,7 +6,23 @@
 
 ## 1. Algoritmos e Métricas Avaliadas
 
-### 1.1 `mpi_matmul.c` (Carga CPU-Bound com Decomposição de Tempos)
+### 1.1 `mpi_montecarlo.c` (Carga Zero-Network / Embarrassingly Parallel com Decomposição de Tempos)
+* **Objetivo:** Avaliar o limite superior de aceleração (*speedup*) e escalabilidade teórica (Lei de Amdahl quase pura) sem interferência de transporte na rede WAN. Permite comparar o poder computacional bruto e o comportamento de *CPU Throttling* / *CPU Steal* entre os processadores locais (Intel Core i7-2600 Sandy Bridge) e nós em nuvem virtualizados (AWS Xeon Sapphire Rapids / Azure AMD EPYC).
+* **Parâmetro Padrão:** $N = 2.500.000.000$ amostras ($2,5$ bilhões de pontos sorteados via PRNG de 64-bits XorShift64* descorrelacionado por rank, durando ~16s por repetição em $np=1$).
+* **Rigor Estatístico:** $30$ repetições consecutivas cronometradas precedidas por $1$ iteração rápida de *warm-up* ($5$ milhões de amostras para estabilização de registradores e pipelines).
+* **Decomposição Granular de Tempos:**
+  Em cada iteração, medem-se isoladamente via `MPI_Wtime` e `MPI_Reduce`:
+  1. $t_{\text{comp\_local}}$: Execução do laço de Monte Carlo (sorteio pseudoaleatório uniforme de $(x, y) \in [0, 1) \times [0, 1)$ e contagem de acertos com $x^2 + y^2 \le 1.0$).
+  2. $t_{\text{straggler\_wait}}$: Barreira `MPI_Barrier` pós-computação para quantificar a espera pelo nó mais lento. Como a carga $N/p$ é estritamente idêntica entre os nós, qualquer desbalanceamento decorre puramente da diferença de clock, microarquitetura e virtualização das CPUs.
+  3. $t_{\text{rede}}$: Redução escalar final via `MPI_Reduce` da contagem de acertos (`MPI_LONG_LONG`).
+  4. $t_{\text{total}}$: Ciclo global da repetição.
+* **Logs Emitidos pelo Rank 0:**
+  - Amostra individual:
+    `AMOSTRA_MONTECARLO,iter=%d,np=%d,amostras=%lld,t_total=%.4f,t_rede=%.4f,t_comp_max=%.4f,t_comp_min=%.4f,t_straggler_wait=%.4f,pi=%.7f`
+  - Resumo estatístico final:
+    `RESUMO_ESTATISTICO_MONTECARLO,np=%d,amostras=%lld,reps=%d,media_total=%.4f,sd_total=%.4f,ic95_total=%.4f,media_rede=%.4f,sd_rede=%.4f,media_comp_max=%.4f,sd_comp_max=%.4f,media_straggler=%.4f,pi_medio=%.7f`
+
+### 1.2 `mpi_matmul.c` (Carga CPU-Bound Bulk-Synchronous com Decomposição de Tempos)
 * **Objetivo:** Avaliar a capacidade de aceleração (*speedup*) em tarefas com alta densidade de cálculo aritmético e investigar detalhadamente o custo de trânsito em rede WAN versus o efeito de nós lentos (*stragglers*).
 * **Dimensão Padrão:** $N = 4800$ (matrizes quadradas de precisão dupla `double`, decomposição 1D por linhas $i \rightarrow k \rightarrow j$).
 * **Rigor Estatístico:** $30$ repetições consecutivas cronometradas precedidas por $1$ iteração de *warm-up* (para aquecimento de janelas TCP WireGuard e caches L1-L3/TLB).
@@ -30,7 +46,7 @@
   - Resumo estatístico final:
     `RESUMO_ESTATISTICO,np=%d,N=%d,reps=%d,media_total=%.4f,sd_total=%.4f,ic95_total=%.4f,media_rede=%.4f,sd_rede=%.4f,media_comp_max=%.4f,sd_comp_max=%.4f,media_straggler=%.4f`
 
-### 1.2 `mpi_heat2d.c` (Carga Network-Bound / Stencil com Decomposição de Tempos)
+### 1.3 `mpi_heat2d.c` (Carga Network-Bound / Stencil com Decomposição de Tempos)
 * **Objetivo:** Investigar a fronteira técnica do *cloud bursting* em tarefas iterativas com sincronização contínua e sensível à latência da rede de longa distância (WAN).
 * **Parâmetros Padrão:** Grade $2000 \times 2000$ pontos, $800$ iterações temporais por repetição e $30$ repetições cronometradas com rigor estatístico.
 * **Mecânica e Decomposição Granular:**
@@ -45,7 +61,7 @@
   - Resumo estatístico final:
     `RESUMO_ESTATISTICO_NETWORK,np=%d,linhas=%d,colunas=%d,iteracoes=%d,reps=%d,media_total=%.4f,sd_total=%.4f,ic95_total=%.4f,media_rede=%.4f,sd_rede=%.4f,media_comp_max=%.4f,sd_comp_max=%.4f,media_straggler=%.4f`
 
-### 1.3 `keystroke_benchmark_browser.js` (Qualidade de Experiência - QoE)
+### 1.4 `keystroke_benchmark_browser.js` (Qualidade de Experiência - QoE)
 * **Objetivo:** Medir a latência percebida pelo aluno ao digitar no terminal interativo (Xterm.js via WebSockets).
 * **Parâmetros:** 50 caracteres (Enter) enviados sequencialmente com intervalo de 80~ms.
 * **Métrica:** Média, P95 e Máxima da latência de eco (*round-trip* da tecla até o caractere refletido).
@@ -143,8 +159,13 @@ Na máquina servidora (onde roda o Kubernetes), transfira os arquivos com o coma
 microk8s kubectl get pods -n terminal-web
 
 # 2. Copie os arquivos da pasta benchmarks para o diretório de trabalho do aluno
+microk8s kubectl cp benchmarks/mpi_montecarlo.c terminal-web/<POD_MASTER>:/home/aluno/mpi_montecarlo.c
 microk8s kubectl cp benchmarks/mpi_matmul.c terminal-web/<POD_MASTER>:/home/aluno/mpi_matmul.c
 microk8s kubectl cp benchmarks/mpi_heat2d.c terminal-web/<POD_MASTER>:/home/aluno/mpi_heat2d.c
+microk8s kubectl cp benchmarks/run_montecarlo_only.sh terminal-web/<POD_MASTER>:/home/aluno/run_montecarlo_only.sh
+microk8s kubectl cp benchmarks/run_montecarlo_hybrid.sh terminal-web/<POD_MASTER>:/home/aluno/run_montecarlo_hybrid.sh
+microk8s kubectl cp benchmarks/run_montecarlo_hybrid_np4.sh terminal-web/<POD_MASTER>:/home/aluno/run_montecarlo_hybrid_np4.sh
+microk8s kubectl cp benchmarks/run_heat_only.sh terminal-web/<POD_MASTER>:/home/aluno/run_heat_only.sh
 microk8s kubectl cp benchmarks/run_benchmarks.sh terminal-web/<POD_MASTER>:/home/aluno/run_benchmarks.sh
 microk8s kubectl cp benchmarks/run_benchmarks_hybrid.sh terminal-web/<POD_MASTER>:/home/aluno/run_benchmarks_hybrid.sh
 ```
@@ -154,7 +175,7 @@ microk8s kubectl cp benchmarks/run_benchmarks_hybrid.sh terminal-web/<POD_MASTER
 Dentro do terminal web do aluno (ou via `microk8s kubectl exec`):
 
 #### A) Para Cenários Homogêneos (Local Puro ou Nuvem Pura):
-Utilize o script sequencial padrão `run_benchmarks.sh` (avalia $np = 1, 2, 4$):
+Utilize o script sequencial completo `run_benchmarks.sh` (executa Monte Carlo, Matmul e Heat2D para $np = 1, 2, 4$):
 ```bash
 chmod +x run_benchmarks.sh
 
@@ -170,17 +191,41 @@ chmod +x run_benchmarks.sh
 *(Ao iniciar, digite uma etiqueta como `local_puro` ou `nuvem_aws` para rotular os arquivos CSV gerados).*
 
 #### B) Para o Cenário Híbrido (Local + Nuvem):
-Utilize o script especializado `run_benchmarks_hybrid.sh`. Ele avalia diretamente **$np = 2$ e $np = 4$** (poupando os ~10 minutos que seriam gastos re-executando $np=1$ no nó local):
+Utilize o script especializado `run_benchmarks_hybrid.sh`. Ele avalia diretamente **$np = 2$ e $np = 4$** (poupando os ~15 minutos que seriam gastos re-executando $np=1$ no nó local):
 ```bash
 chmod +x run_benchmarks_hybrid.sh
 
 # Executa np=2 (1 Local + 1 Nuvem) e np=4 (2 Locais + 2 Nuvem):
 ./run_benchmarks_hybrid.sh "master,worker-1,worker-2,worker-3"
 ```
-*(O script solicitará o tempo $T_1$ obtido no ensaio Local Puro. Ao fornecê-lo, ele calcula o **Speedup Híbrido Real** $S_p = T_1^{\text{local}} / T_p^{\text{híbrido}}$ e a Eficiência).*
+*(O script solicitará os tempos $T_1$ obtidos no ensaio Local Puro para Monte Carlo, Matmul e Heat2D. Ao fornecê-los, ele calcula o **Speedup Híbrido Real** $S_p = T_1^{\text{local}} / T_p^{\text{híbrido}}$ e a Eficiência).*
 
-#### C) Para Executar Exclusivamente a Difusão de Calor (`run_heat_only.sh`):
-Caso já tenha rodado a multiplicação de matrizes e queira executar (ou refazer) apenas o benchmark Network-Bound sem esperar o teste de CPU novamente:
+#### C) Para Executar Exclusivamente a Simulação de Monte Carlo (`run_montecarlo_only.sh`):
+Caso queira executar apenas a carga Zero-Network de pura CPU:
+```bash
+chmod +x run_montecarlo_only.sh
+
+# Executa as 30 repetições de mpi_montecarlo para np = 1, 2, 4 com decomposição de tempos e CSV:
+./run_montecarlo_only.sh "master,worker-1,worker-2,worker-3"
+```
+
+#### D) Para Executar Monte Carlo no Cluster Híbrido:
+* **Executar a Bateria Completa ($np = 2$ e $np = 4$):**
+  Utilize o script `run_montecarlo_hybrid.sh` (avalia $np=2$ pareando `master,worker-2` e $np=4$ pareando `master,worker-1,worker-2,worker-3`):
+  ```bash
+  chmod +x run_montecarlo_hybrid.sh
+  ./run_montecarlo_hybrid.sh "master,worker-1,worker-2,worker-3"
+  ```
+* **Executar Exclusivamente 4 Processos ($np = 4$ - 2 Locais + 2 Nuvem):**
+  Utilize o script dedicado `run_montecarlo_hybrid_np4.sh`:
+  ```bash
+  chmod +x run_montecarlo_hybrid_np4.sh
+  ./run_montecarlo_hybrid_np4.sh "master,worker-1,worker-2,worker-3"
+  ```
+*(Ambos solicitam o tempo $T_1$ obtido no ensaio Local Puro para calcular o Speedup Híbrido Real e a Eficiência).*
+
+#### E) Para Executar Exclusivamente a Difusão de Calor (`run_heat_only.sh`):
+Caso queira executar apenas o benchmark Network-Bound sem esperar os testes de CPU:
 ```bash
 chmod +x run_heat_only.sh
 
@@ -188,7 +233,7 @@ chmod +x run_heat_only.sh
 ./run_heat_only.sh "master,worker-1,worker-2,worker-3"
 ```
 
-#### D) Importar os Resultados no Google Planilhas:
+#### F) Importar os Resultados no Google Planilhas:
 1. Ao final dos testes, acesse o editor do TerminalWeb ou baixe o arquivo de resultados do pod:
    `microk8s kubectl cp terminal-web/<POD_MASTER>:/home/aluno/resultados/ .`
 2. No **Google Planilhas**, vá em **Arquivo > Importar > Fazer Upload** e selecione o arquivo `<TAG>_amostras.csv`.

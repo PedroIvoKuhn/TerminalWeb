@@ -294,7 +294,7 @@ async function addNode({ provider, credentials, customJoinCommand, onProgress, o
 
         if (onProgress) onProgress(3, `Instância criada! Aguardando boot e join no cluster...`);
 
-        const clusterResult = await waitForMultipleNodesInCluster([{ targetId: nodeId, expectedNames }], 420000, onProgress, isCancelled);
+        const clusterResult = await waitForMultipleNodesInCluster([{ targetId: nodeId, expectedNames }], 540000, onProgress, isCancelled);
         if (clusterResult.cancelled) {
             throw new Error(`Operação cancelada pelo usuário enquanto aguardava o nó ${nodeId}.`);
         }
@@ -374,7 +374,7 @@ async function addNode({ provider, credentials, customJoinCommand, onProgress, o
             }
         ];
 
-        const clusterResult = await waitForMultipleNodesInCluster(targetsList, 450000, onProgress, isCancelled);
+        const clusterResult = await waitForMultipleNodesInCluster(targetsList, 600000, onProgress, isCancelled);
         if (clusterResult.cancelled) {
             throw new Error(`Operação cancelada pelo usuário durante o monitoramento dos nós.`);
         }

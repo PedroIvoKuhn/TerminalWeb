@@ -388,8 +388,9 @@ async function handleSessionBurst(socket, data = {}) {
                     credentials: cryptoService.encryptCredentials(credentials)
                 };
                 pendingBurstInfos.push(nodeInfo);
-                sessionService.registerPendingBurst(socket.id, nodeInfo);
-                console.log(`[BURST] Nó ${createdNodeId} (${nodeName}) criado e registrado como pendente para o socket ${socket.id}.`);
+                const ownerKey = socket.data.userId || socket.id;
+                sessionService.registerPendingBurst(ownerKey, nodeInfo, socket.id);
+                console.log(`[BURST] Nó ${createdNodeId} (${nodeName}) criado e registrado como pendente para o owner '${ownerKey}' (socket: ${socket.id}).`);
 
                 // Se o socket desconectou enquanto a VM era provisionada, destrói imediatamente!
                 if (socket.disconnected || socket.data.isDisconnected) {

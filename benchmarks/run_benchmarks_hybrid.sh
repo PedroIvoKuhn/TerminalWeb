@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Script de Execução Automatizada dos Benchmarks MPI para CLUSTER HÍBRIDO
-# (Pareamento com worker-2 em np=2 para cobrir 1 nó Local + 1 nó Nuvem)
-# Otimizado para o TCC:
+# Script de Execução Automatizada dos Benchmarks MPI para CLUSTER HÍBRIDO (TCC)
+# (Pareamento com worker-2 em np=2 para cobrir 1 nó Local + 1 nó Nuvem via Tailscale)
+# Tríade Metodológica Completa:
+# 1. Zero-Network / Pura CPU: Simulação de Monte Carlo (Estimativa de Pi)
+# 2. Bulk-Synchronous / CPU + Dados: Multiplicação de Matrizes (Matmul)
+# 3. Fine-Grained / Latency-Bound: Difusão de Calor 2D (Heat2D Stencil)
+# Inclui:
 # - Avalia diretamente np=2 e np=4 (eliminando o teste redundante em np=1)
 # - Permite informar T1 do Local Puro para Speedup e Eficiência Híbrida Real
 # - Exportação de Logs (.log) e Planilhas (.csv) prontas para o Google Planilhas
 # - Cooldown anti-throttling térmico e recomposição de créditos de CPU na nuvem
-# - Decomposição Granular de Tempos para CPU-Bound e Network-Bound (Rede, Comp, Straggler)
+# - Decomposição Granular de Tempos (Rede, Comp, Straggler)
 # ==============================================================================
 
 # Suprime avisos do OpenSSH e configura MCA para rede de Pods Calico CNI e VPN WAN Tailscale
@@ -56,13 +60,15 @@ RESUMO_CSV="$RESULTS_DIR/${BENCH_TAG}_resumo.csv"
 # Redireciona stdout e stderr para tela e arquivo de log simultaneamente
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-# Pergunta ou recebe o tempo de referência T1 de CPU e de Rede (np=1 do Local Puro)
+# Pergunta ou recebe os tempos de referência T1 de Monte Carlo, Matmul e Heat (np=1 do Local Puro)
 if [ -z "$T1_REF" ] && [ -t 0 ]; then
     echo ""
     echo "Dica: Para calcular o Speedup real do cluster híbrido frente ao nó local puro,"
-    read -r -p "informe o Tempo Médio de np=1 de CPU (Matmul) obtido no Local Puro em segundos (ou Enter para pular): " T1_INPUT
+    read -r -p "informe o Tempo Médio de np=1 de Monte Carlo em segundos [ou Enter para pular]: " T1_MC_INPUT
+    T1_MC_REF="$T1_MC_INPUT"
+    read -r -p "informe o Tempo Médio de np=1 de CPU (Matmul) em segundos [ou Enter para pular]: " T1_INPUT
     T1_REF="$T1_INPUT"
-    read -r -p "informe o Tempo Médio de np=1 de Rede (Heat2d) obtido no Local Puro em segundos (ou Enter para pular): " T1_HEAT_INPUT
+    read -r -p "informe o Tempo Médio de np=1 de Rede (Heat2d) em segundos [ou Enter para pular]: " T1_HEAT_INPUT
     T1_HEAT_REF="$T1_HEAT_INPUT"
 fi
 
@@ -70,15 +76,20 @@ echo "=========================================================="
 echo "    BATERIA DE TESTES DE DESEMPENHO MPI (CLUSTER HÍBRIDO) "
 echo "=========================================================="
 echo "Identificador do Ensaio: $BENCH_TAG"
-if [ -n "$T1_REF" ]; then
-    echo "Tempo de Referência Local T1 (CPU):  ${T1_REF}s"
+if [ -n "$T1_MC_REF" ]; then
+    echo "Tempo de Referência Local T1 (Monte Carlo): ${T1_MC_REF}s"
 else
-    echo "Tempo de Referência Local T1 (CPU):  Não informado (Speedup relativo a np=2)"
+    echo "Tempo de Referência Local T1 (Monte Carlo): Não informado (Speedup relativo a np=2)"
+fi
+if [ -n "$T1_REF" ]; then
+    echo "Tempo de Referência Local T1 (CPU Matmul):   ${T1_REF}s"
+else
+    echo "Tempo de Referência Local T1 (CPU Matmul):   Não informado (Speedup relativo a np=2)"
 fi
 if [ -n "$T1_HEAT_REF" ]; then
-    echo "Tempo de Referência Local T1 (Rede): ${T1_HEAT_REF}s"
+    echo "Tempo de Referência Local T1 (Rede Heat):    ${T1_HEAT_REF}s"
 else
-    echo "Tempo de Referência Local T1 (Rede): Não informado (Speedup relativo a np=2)"
+    echo "Tempo de Referência Local T1 (Rede Heat):    Não informado (Speedup relativo a np=2)"
 fi
 echo "Log completo da execução: $LOG_FILE"
 echo "Amostras para Google Planilhas: $CSV_FILE"
@@ -90,6 +101,8 @@ echo ""
 echo "cenario,carga,iteracao,np,N,t_total,t_rede,t_bcast,t_scatter,t_gather,t_comp_max,t_comp_min,t_straggler_wait" > "$CSV_FILE"
 
 # Parâmetros de execução (Sobrescrevíveis via variáveis de ambiente)
+MC_SAMPLES="${MC_SAMPLES:-2500000000}" # 2.5 bilhões de amostras Monte Carlo (Zero-Network)
+MC_REPS="${MC_REPS:-30}"             # 30 repetições para rigor estatístico do TCC
 MATMUL_N="${MATMUL_N:-4800}"        # Dimensão da matriz quadrada (N x N)
 MATMUL_REPS="${MATMUL_REPS:-30}"    # 30 repetições para rigor estatístico do TCC
 HEAT_ROWS="${HEAT_ROWS:-2000}"      # Linhas da grade 2D
@@ -112,7 +125,7 @@ cooldown() {
 # 1. Compilação Multi-Arquitetura Otimizada
 # -O3 -mavx2 -mfma -funroll-loops para Intel Xeon Sapphire Rapids / AMD EPYC
 # com detecção segura para evitar SIGILL em nós Core i7 Sandy Bridge (i7-2600 local)
-echo "[1/3] Compilando algoritmos..."
+echo "[1/4] Compilando algoritmos..."
 if grep -q "avx2" /proc/cpuinfo 2>/dev/null && grep -q "fma" /proc/cpuinfo 2>/dev/null; then
     MATMUL_ARCH_FLAGS="-mavx2 -mfma"
 elif grep -q "avx" /proc/cpuinfo 2>/dev/null; then
@@ -121,9 +134,10 @@ else
     MATMUL_ARCH_FLAGS=""
 fi
 
+mpicc -O3 -Wall mpi_montecarlo.c -o mpi_montecarlo -lm
 mpicc -O3 $MATMUL_ARCH_FLAGS -funroll-loops -Wall mpi_matmul.c -o mpi_matmul -lm
 mpicc -O3 -Wall mpi_heat2d.c -o mpi_heat2d -lm
-echo "-> Binários gerados com sucesso (Flags Matmul: -O3 $MATMUL_ARCH_FLAGS -funroll-loops + IFUNC multi-arch)."
+echo "-> Binários gerados com sucesso (Monte Carlo, Matmul IFUNC multi-arch e Heat2D)."
 echo ""
 
 # Verifica se foi passado um hostfile/hosts ou detecta automaticamente via ~/.ssh/config
@@ -150,7 +164,7 @@ if [ -n "$TARGET_HOSTS" ]; then
             echo "-> Enviando para $clean_host..."
             ssh -q -o LogLevel=ERROR -o StrictHostKeyChecking=no "$clean_host" "mkdir -p /home/aluno/.openmpi" 2>/dev/null || true
             scp -q -o LogLevel=ERROR -o StrictHostKeyChecking=no "$HOME/.openmpi/mca-params.conf" "$clean_host:/home/aluno/.openmpi/mca-params.conf" 2>/dev/null || true
-            scp -q -o LogLevel=ERROR -o StrictHostKeyChecking=no mpi_matmul mpi_heat2d "$clean_host:/home/aluno/" || echo "Aviso: Falha ao copiar para $clean_host."
+            scp -q -o LogLevel=ERROR -o StrictHostKeyChecking=no mpi_montecarlo mpi_matmul mpi_heat2d "$clean_host:/home/aluno/" || echo "Aviso: Falha ao copiar para $clean_host."
         fi
     done
     echo "-> Sincronização concluída com sucesso."
@@ -159,7 +173,7 @@ else
     echo "Aviso: Nenhum host especificado ou detectado. Executando localmente no Pod mestre."
 fi
 
-# Define os processos a testar no cluster híbrido (padrão otimizado: 2 4; np=1 omitido por ser puramente local)
+# Define os processos a testar no cluster híbrido (padrão otimizado: 2 4; np=1 omitido para evitar teste redundante)
 if [ -n "$2" ]; then
     PROCESS_LIST="$2"
 else
@@ -169,8 +183,10 @@ echo "Processos a avaliar no cluster híbrido (np): $PROCESS_LIST"
 echo ""
 
 # Mapeamento para cluster híbrido:
+# Para np=1: executa no nó local (master) como linha de base.
 # Para np=2 em clusters com 3 ou mais nós (ex: master,worker-1,worker-2,worker-3),
 # seleciona intencionalmente "master,worker-2" para cobrir 1 nó Local (master) + 1 nó Nuvem (worker-2).
+# Para np=4: seleciona "master,worker-1,worker-2,worker-3" (2 Locais + 2 Nuvem).
 get_hosts_for_np() {
     local target_np="$1"
     local raw_hosts="$2"
@@ -182,7 +198,9 @@ get_hosts_for_np() {
     IFS=',' read -ra ALL_HOSTS <<< "$raw_hosts"
     local total=${#ALL_HOSTS[@]}
 
-    if [ "$target_np" -eq 2 ] && [ "$total" -ge 3 ]; then
+    if [ "$target_np" -eq 1 ]; then
+        echo "${ALL_HOSTS[0]}"
+    elif [ "$target_np" -eq 2 ] && [ "$total" -ge 3 ]; then
         echo "${ALL_HOSTS[0]},${ALL_HOSTS[2]}"
     elif [ "$target_np" -le "$total" ]; then
         local sel=("${ALL_HOSTS[@]:0:$target_np}")
@@ -192,9 +210,69 @@ get_hosts_for_np() {
     fi
 }
 
-# 2. Testes CPU-Bound (Multiplicação de Matrizes N=4800, 30 Repetições com Decomposição)
+# 2. Testes Zero-Network / Pura CPU Híbrido (Monte Carlo N=2.500.000.000, 30 Repetições com Decomposição)
 echo "=========================================================="
-echo " [2/3] Executando Carga CPU-Bound (mpi_matmul N=$MATMUL_N, REPS=$MATMUL_REPS)"
+echo " [2/4] Executando Carga Zero-Network (mpi_montecarlo N=$MC_SAMPLES, REPS=$MC_REPS)"
+echo "=========================================================="
+
+for np in $PROCESS_LIST; do
+    echo "--- Testando Carga Zero-Network com np=$np ($MC_REPS repetições internas + warm-up) ---"
+    
+    # Determina o subconjunto exato de hosts para o np atual
+    CURRENT_HOSTS_FLAG=""
+    if [ -n "$TARGET_HOSTS" ]; then
+        CURRENT_HOSTS=$(get_hosts_for_np "$np" "$TARGET_HOSTS")
+        CURRENT_HOSTS_FLAG="-H $CURRENT_HOSTS"
+        if [ "$np" -eq 1 ]; then
+            echo "Hosts ativos para np=$np: $CURRENT_HOSTS (linha de base local puro [master])"
+        elif [ "$np" -eq 2 ] && [ "$CURRENT_HOSTS" = "master,worker-2" ]; then
+            echo "Hosts ativos para np=$np: $CURRENT_HOSTS (pareamento híbrido 50% Local + 50% Nuvem via Tailscale)"
+        elif [ "$np" -eq 4 ]; then
+            echo "Hosts ativos para np=$np: $CURRENT_HOSTS (particionamento híbrido 2 Locais + 2 Nuvem)"
+        else
+            echo "Hosts ativos para np=$np: $CURRENT_HOSTS"
+        fi
+    fi
+
+    # Executa mpi_montecarlo
+    while IFS= read -r line; do
+        echo "$line"
+        if [[ "$line" == AMOSTRA_MONTECARLO* ]]; then
+            SEC=$(echo "$line" | sed -n 's/.*t_total=\([0-9.]*\).*/\1/p')
+            if [ -n "$SEC" ]; then
+                echo "$SEC" >> "$TMP_DIR/mc_np_${np}.txt"
+            fi
+            # Grava no CSV unificado para Google Planilhas
+            it=$(echo "$line" | sed -n 's/.*iter=\([0-9]*\).*/\1/p')
+            t_tot=$(echo "$line" | sed -n 's/.*t_total=\([0-9.]*\).*/\1/p')
+            t_red=$(echo "$line" | sed -n 's/.*t_rede=\([0-9.]*\).*/\1/p')
+            t_cmax=$(echo "$line" | sed -n 's/.*t_comp_max=\([0-9.]*\).*/\1/p')
+            t_cmin=$(echo "$line" | sed -n 's/.*t_comp_min=\([0-9.]*\).*/\1/p')
+            t_strag=$(echo "$line" | sed -n 's/.*t_straggler_wait=\([0-9.]*\).*/\1/p')
+            echo "${BENCH_TAG},monte_carlo,${it},${np},${MC_SAMPLES},${t_tot},${t_red},0.0000,0.0000,0.0000,${t_cmax},${t_cmin},${t_strag}" >> "$CSV_FILE"
+        elif [[ "$line" == RESUMO_ESTATISTICO_MONTECARLO* ]]; then
+            echo "$line" >> "$TMP_DIR/mc_resumo_np_${np}.txt"
+        fi
+    done < <(mpirun --allow-run-as-root --oversubscribe \
+             --mca plm_rsh_args "-o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
+             --mca btl_tcp_if_include eth0 \
+             --mca oob_tcp_if_include eth0 \
+             --mca mpi_yield_when_idle 1 \
+             --mca btl_tcp_sndbuf 4194304 \
+             --mca btl_tcp_rcvbuf 4194304 \
+             $CURRENT_HOSTS_FLAG -np $np ./mpi_montecarlo $MC_SAMPLES $MC_REPS 2>/dev/null)
+    
+    # Cooldown entre configurações de processo para resfriamento
+    cooldown "$COOLDOWN_SECS"
+done
+
+# Cooldown intermediário entre as baterias Zero-Network e CPU-Bound
+echo "Transição de fase: preparando carga CPU-Bound (Matmul)..."
+cooldown 8
+
+# 3. Testes CPU-Bound (Multiplicação de Matrizes N=4800, 30 Repetições com Decomposição)
+echo "=========================================================="
+echo " [3/4] Executando Carga CPU-Bound (mpi_matmul N=$MATMUL_N, REPS=$MATMUL_REPS)"
 echo "=========================================================="
 
 for np in $PROCESS_LIST; do
@@ -205,8 +283,12 @@ for np in $PROCESS_LIST; do
     if [ -n "$TARGET_HOSTS" ]; then
         CURRENT_HOSTS=$(get_hosts_for_np "$np" "$TARGET_HOSTS")
         CURRENT_HOSTS_FLAG="-H $CURRENT_HOSTS"
-        if [ "$np" -eq 2 ] && [ "$CURRENT_HOSTS" = "master,worker-2" ]; then
+        if [ "$np" -eq 1 ]; then
+            echo "Hosts ativos para np=$np: $CURRENT_HOSTS (linha de base local puro [master])"
+        elif [ "$np" -eq 2 ] && [ "$CURRENT_HOSTS" = "master,worker-2" ]; then
             echo "Hosts ativos para np=$np: $CURRENT_HOSTS (pareamento híbrido 50% Local + 50% Nuvem via Tailscale)"
+        elif [ "$np" -eq 4 ]; then
+            echo "Hosts ativos para np=$np: $CURRENT_HOSTS (particionamento híbrido 2 Locais + 2 Nuvem)"
         else
             echo "Hosts ativos para np=$np: $CURRENT_HOSTS"
         fi
@@ -241,12 +323,12 @@ for np in $PROCESS_LIST; do
 done
 
 # Cooldown intermediário entre as baterias CPU-Bound e Network-Bound
-echo "Transição de fase: preparando carga Network-Bound..."
+echo "Transição de fase: preparando carga Network-Bound (Heat2D)..."
 cooldown 8
 
-# 3. Testes Network-Bound (Difusão de Calor 2D, 30 Repetições com Decomposição)
+# 4. Testes Network-Bound (Difusão de Calor 2D, 30 Repetições com Decomposição)
 echo "=========================================================="
-echo " [3/3] Executando Carga Network-Bound (mpi_heat2d ${HEAT_ROWS}x${HEAT_ROWS}, ${HEAT_STEPS} iter, REPS=$HEAT_REPS)"
+echo " [4/4] Executando Carga Network-Bound (mpi_heat2d ${HEAT_ROWS}x${HEAT_ROWS}, ${HEAT_STEPS} iter, REPS=$HEAT_REPS)"
 echo "=========================================================="
 
 for np in $PROCESS_LIST; do
@@ -257,8 +339,12 @@ for np in $PROCESS_LIST; do
     if [ -n "$TARGET_HOSTS" ]; then
         CURRENT_HOSTS=$(get_hosts_for_np "$np" "$TARGET_HOSTS")
         CURRENT_HOSTS_FLAG="-H $CURRENT_HOSTS"
-        if [ "$np" -eq 2 ] && [ "$CURRENT_HOSTS" = "master,worker-2" ]; then
+        if [ "$np" -eq 1 ]; then
+            echo "Hosts ativos para np=$np: $CURRENT_HOSTS (linha de base local puro [master])"
+        elif [ "$np" -eq 2 ] && [ "$CURRENT_HOSTS" = "master,worker-2" ]; then
             echo "Hosts ativos para np=$np: $CURRENT_HOSTS (pareamento híbrido 50% Local + 50% Nuvem via Tailscale)"
+        elif [ "$np" -eq 4 ]; then
+            echo "Hosts ativos para np=$np: $CURRENT_HOSTS (particionamento híbrido 2 Locais + 2 Nuvem)"
         else
             echo "Hosts ativos para np=$np: $CURRENT_HOSTS"
         fi
@@ -298,14 +384,15 @@ for np in $PROCESS_LIST; do
     cooldown "$COOLDOWN_SECS"
 done
 
-# 4. Cálculo Estatístico (Média, Desvio Padrão, Speedup e Eficiência)
+# 5. Cálculo Estatístico (Média, Desvio Padrão, Speedup e Eficiência)
 echo "=========================================================="
 echo "          RESUMO ESTATÍSTICO CONSOLIDADO DO TCC           "
 echo "=========================================================="
 
-awk -v procs="$PROCESS_LIST" -v tmp="$TMP_DIR" -v matmul_n="$MATMUL_N" -v matmul_reps="$MATMUL_REPS" -v heat_rows="$HEAT_ROWS" -v heat_steps="$HEAT_STEPS" -v heat_reps="$HEAT_REPS" -v tag="$BENCH_TAG" -v resumo_csv="$RESUMO_CSV" -v t1_ref_in="$T1_REF" -v t1_heat_ref_in="$T1_HEAT_REF" '
+awk -v procs="$PROCESS_LIST" -v tmp="$TMP_DIR" -v mc_samples="$MC_SAMPLES" -v mc_reps="$MC_REPS" -v matmul_n="$MATMUL_N" -v matmul_reps="$MATMUL_REPS" -v heat_rows="$HEAT_ROWS" -v heat_steps="$HEAT_STEPS" -v heat_reps="$HEAT_REPS" -v tag="$BENCH_TAG" -v resumo_csv="$RESUMO_CSV" -v t1_mc_ref_in="$T1_MC_REF" -v t1_ref_in="$T1_REF" -v t1_heat_ref_in="$T1_HEAT_REF" '
 BEGIN {
     n_procs = split(procs, plist, " ")
+    t1_mc_ref_val = (t1_mc_ref_in + 0.0)
     t1_ref_val = (t1_ref_in + 0.0)
     t1_heat_ref_val = (t1_heat_ref_in + 0.0)
 
@@ -313,7 +400,84 @@ BEGIN {
     print "cenario,carga,np,dimensao_N,repeticoes,tempo_medio_s,desvio_padrao_s,ic95_s,speedup,eficiencia_pct,media_rede_s,media_comp_max_s,media_straggler_s" > resumo_csv
 
     # ----------------------------------------------------
-    # 1. Processa Carga CPU-Bound
+    # 1. Processa Carga Zero-Network (Monte Carlo)
+    # ----------------------------------------------------
+    delete means
+    delete stds
+    delete ic95s
+    for (idx = 1; idx <= n_procs; idx++) {
+        p = plist[idx]
+        file = tmp "/mc_np_" p ".txt"
+        n = 0; sum = 0
+        delete vals
+        while ((getline val < file) > 0) {
+            if (val > 0) { n++; vals[n] = val; sum += val }
+        }
+        close(file)
+        if (n > 0) {
+            means[p] = sum / n
+            var = 0
+            for (i = 1; i <= n; i++) var += (vals[i] - means[p])^2
+            stds[p] = (n > 1) ? sqrt(var / (n - 1)) : 0
+            ic95s[p] = (n > 1) ? 1.96 * stds[p] / sqrt(n) : 0
+        }
+    }
+    
+    if (t1_mc_ref_val > 0) {
+        t1_mc = t1_mc_ref_val
+        mc_ref_label = sprintf("T1_Local_Ref = %.3fs", t1_mc)
+    } else {
+        t1_mc = (plist[1] in means) ? means[plist[1]] : 0
+        mc_ref_label = sprintf("Relativo a np=%d (%.3fs)", plist[1], t1_mc)
+    }
+
+    printf "\n=== 1. Carga Zero-Network Híbrida: Monte Carlo (N=%d, REPS=%d) ===\n", mc_samples, mc_reps
+    printf "Base de Comparação de Speedup: %s\n", mc_ref_label
+    printf "%-5s | %-18s | %-10s | %-10s\n", "np", "Tempo Médio (s)", "Speedup", "Eficiência"
+    print "------------------------------------------------------------"
+    for (idx = 1; idx <= n_procs; idx++) {
+        p = plist[idx]
+        if (p in means && means[p] > 0) {
+            speedup = t1_mc / means[p]
+            eff = (speedup / p) * 100
+            printf "%-5d | %6.3f ± %5.3f s   | %8.2fx | %9.1f%%\n", p, means[p], stds[p], speedup, eff
+        }
+    }
+
+    # 1.1 Decomposição Média de Tempos Monte Carlo Híbrido (Rede, Comp, Straggler)
+    printf "\n--- Decomposição Média de Tempos Zero-Network Híbrido (N=%d) ---\n", mc_samples
+    printf "%-5s | %-12s | %-12s | %-12s | %-12s\n", "np", "T_Total (s)", "T_Rede (s)", "T_CompMax(s)", "Straggler(s)"
+    print "------------------------------------------------------------------------"
+    for (idx = 1; idx <= n_procs; idx++) {
+        p = plist[idx]
+        res_file = tmp "/mc_resumo_np_" p ".txt"
+        m_rede = 0; m_comp = 0; m_strag = 0
+        if ((getline line < res_file) > 0) {
+            split(line, fields, ",")
+            delete kv
+            for (f in fields) {
+                split(fields[f], pair, "=")
+                if (length(pair) == 2) kv[pair[1]] = pair[2]
+            }
+            m_rede = kv["media_rede"]
+            m_comp = kv["media_comp_max"]
+            m_strag = kv["media_straggler"]
+            printf "%-5d | %10.4f s | %10.4f s | %10.4f s | %10.4f s\n",
+                   p, kv["media_total"], m_rede, m_comp, m_strag
+        }
+        close(res_file)
+
+        # Grava no CSV Resumo
+        if (p in means && means[p] > 0) {
+            speedup = t1_mc / means[p]
+            eff = (speedup / p) * 100
+            printf "%s,monte_carlo,%d,%d,%d,%.4f,%.4f,%.4f,%.2f,%.1f,%.4f,%.4f,%.4f\n",
+                   tag, p, mc_samples, mc_reps, means[p], stds[p], ic95s[p], speedup, eff, m_rede, m_comp, m_strag >> resumo_csv
+        }
+    }
+
+    # ----------------------------------------------------
+    # 2. Processa Carga CPU-Bound (Matmul)
     # ----------------------------------------------------
     delete means
     delete stds
@@ -344,7 +508,7 @@ BEGIN {
         ref_label = sprintf("Relativo a np=%d (%.3fs)", plist[1], t1_matmul)
     }
 
-    printf "\n=== 1. Carga CPU-Bound Híbrida: Multiplicação de Matrizes (N=%d, REPS=%d) ===\n", matmul_n, matmul_reps
+    printf "\n=== 2. Carga CPU-Bound Híbrida: Multiplicação de Matrizes (N=%d, REPS=%d) ===\n", matmul_n, matmul_reps
     printf "Base de Comparação de Speedup: %s\n", ref_label
     printf "%-5s | %-18s | %-10s | %-10s\n", "np", "Tempo Médio (s)", "Speedup", "Eficiência"
     print "------------------------------------------------------------"
@@ -357,7 +521,7 @@ BEGIN {
         }
     }
 
-    # 1.1 Decomposição Média de Tempos CPU-Bound (Rede, Comp, Straggler)
+    # 2.1 Decomposição Média de Tempos CPU-Bound (Rede, Comp, Straggler)
     printf "\n--- Decomposição Média de Tempos CPU-Bound Híbrido (N=%d) ---\n", matmul_n
     printf "%-5s | %-12s | %-12s | %-12s | %-12s\n", "np", "T_Total (s)", "T_Rede (s)", "T_CompMax(s)", "Straggler(s)"
     print "------------------------------------------------------------------------"
@@ -390,7 +554,7 @@ BEGIN {
     }
     
     # ----------------------------------------------------
-    # 2. Processa Carga Network-Bound
+    # 3. Processa Carga Network-Bound (Heat2D)
     # ----------------------------------------------------
     delete means
     delete stds
@@ -421,7 +585,7 @@ BEGIN {
         heat_ref_label = sprintf("Relativo a np=%d (%.3fs)", plist[1], t1_heat)
     }
 
-    printf "\n=== 2. Carga Network-Bound Híbrida: Difusão de Calor 2D (%dx%d, %d iter, REPS=%d) ===\n", heat_rows, heat_rows, heat_steps, heat_reps
+    printf "\n=== 3. Carga Network-Bound Híbrida: Difusão de Calor 2D (%dx%d, %d iter, REPS=%d) ===\n", heat_rows, heat_rows, heat_steps, heat_reps
     printf "Base de Comparação de Speedup: %s\n", heat_ref_label
     printf "%-5s | %-18s | %-10s | %-10s\n", "np", "Tempo Médio (s)", "Speedup", "Eficiência"
     print "------------------------------------------------------------"
@@ -434,7 +598,7 @@ BEGIN {
         }
     }
 
-    # 2.1 Decomposição Média de Tempos Network-Bound (Rede, Comp, Straggler)
+    # 3.1 Decomposição Média de Tempos Network-Bound Híbrido (Rede, Comp, Straggler)
     printf "\n--- Decomposição Média de Tempos Network-Bound Híbrido (%dx%d) ---\n", heat_rows, heat_rows
     printf "%-5s | %-12s | %-12s | %-12s | %-12s\n", "np", "T_Total (s)", "T_Rede (s)", "T_CompMax(s)", "Straggler(s)"
     print "------------------------------------------------------------------------"
