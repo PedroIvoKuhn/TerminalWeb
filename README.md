@@ -1,4 +1,4 @@
-# 🚀 Terminal Web para Clusters
+# Terminal Web para Clusters
 
 ![Node.js](https://img.shields.io/badge/Node.js-43853D?style=for-the-badge&logo=node.js&logoColor=white)
 ![Kubernetes](https://img.shields.io/badge/kubernetes-%23326ce5.svg?style=for-the-badge&logo=kubernetes&logoColor=white)
@@ -8,13 +8,9 @@
 
 Uma aplicação web projetada para provisionar, sob demanda, ambientes de clusters distribuídos (Multi-Node) pré-configurados. Focada em cenários educacionais (como o ensino de MPI - Message Passing Interface), a plataforma utiliza **Kubernetes** para orquestrar contêineres dinamicamente, oferecendo a cada aluno um cluster privado, seguro e acessível diretamente pelo navegador, sem necessidade de instalações locais.
 
-> 💡 **Veja em funcionamento:**
-> 
-> *[Sugestão: Grave um GIF de uns 15 segundos mostrando a tela inicial, escolhendo 3 nós, e abrindo o terminal. Substitua o link abaixo]*
-> 
-> ![Demonstração do Terminal Web](./docs/demo.gif)
+https://github.com/user-attachments/assets/023b018a-353f-412a-ab80-598374bd006b
 
-## ✨ Principais Funcionalidades
+## Principais Funcionalidades
 
 - **Provisionamento Sob Demanda:** Criação de ambientes multi-node em segundos.
 - **Isolamento e Segurança (RBAC):** Cada sessão gera recursos únicos no K8s e um par de chaves SSH efêmeras (geradas via `node-forge`), garantindo que apenas os nós de um mesmo cluster possam se comunicar.
@@ -27,7 +23,7 @@ Uma aplicação web projetada para provisionar, sob demanda, ambientes de cluste
 - **Integração LTI (Learning Tools Interoperability):** Autenticação transparente com plataformas LMS (como o Moodle), garantindo que apenas alunos matriculados tenham acesso.
 - **Restauração de Sessão:** A sessão se mantém aberta por 2 horas (com opção de extensão), sobrevivendo a reloads da página, quedas de internet e até reinicializações do servidor Node.js (sincronização com as *Annotations* do K8s).
 
-## 🛠️ Arquitetura e Stack Tecnológica
+## Arquitetura e Stack Tecnológica
 
 - **Front-end:** JS, HTML5, CSS3, Xterm.js.
 - **Back-end:** Node.js, Express, Socket.IO.
@@ -37,7 +33,7 @@ Uma aplicação web projetada para provisionar, sob demanda, ambientes de cluste
 
 ---
 
-## ⚙️ Variáveis de Ambiente (.env)
+## Variáveis de Ambiente (.env)
 
 Para rodar este projeto, você precisará configurar um arquivo `.env` na raiz do diretório. Abaixo estão as variáveis utilizadas pela aplicação:
 
@@ -67,7 +63,7 @@ Para rodar este projeto, você precisará configurar um arquivo `.env` na raiz d
 
 ---
 
-## 🚀 Rodando Localmente
+## Rodando Localmente
 
 ### Pré-requisitos
 - **Node.js** (v18 ou superior)
@@ -111,7 +107,7 @@ Acesse a aplicação abrindo seu navegador em [http://localhost:3000](http://loc
 
 ---
 
-## 🛡️ Preocupações com Segurança (AppSec)
+## Preocupações com Segurança (AppSec)
 
 Durante o desenvolvimento, diversas medidas de segurança foram implementadas:
 - **Proteção contra Path Traversal e IDOR:** Caminhos de arquivos no MinIO são higienizados (`path.basename`) para evitar que usuários manipulem a URL e acessem backups de outros alunos.
